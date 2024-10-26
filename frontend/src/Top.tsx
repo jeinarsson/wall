@@ -1,21 +1,10 @@
-import { useState } from 'react'
+import Month from './Month.tsx'
 
 import './fullscreen.css';
 
 
 function Top() {
-  const [count, setCount] = useState(0)
-
-  return (
-    <>
-      <h1>Top screen</h1>
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-      </div>
-    </>
-  )
+  return <Month/>
 }
 
 export default Top
