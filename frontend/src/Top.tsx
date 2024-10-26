@@ -1,5 +1,8 @@
 import { useState } from 'react'
 
+import './fullscreen.css';
+
+
 function Top() {
   const [count, setCount] = useState(0)
 

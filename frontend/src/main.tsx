@@ -5,6 +5,8 @@ import {
   RouterProvider,
 } from "react-router-dom";
 
+import './normalize.css';
+
 import Bottom from './Bottom.tsx'
 import Top from './Top.tsx'
 

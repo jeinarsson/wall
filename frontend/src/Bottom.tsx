@@ -1,5 +1,7 @@
 import { useState } from 'react'
 
+import './fullscreen.css';
+
 function Bottom() {
   const [count, setCount] = useState(0)
 
