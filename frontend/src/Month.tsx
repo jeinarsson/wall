@@ -1,4 +1,4 @@
-import { FC, useState } from 'react'
+import { FC, useMemo } from 'react'
 import { Calendar, dateFnsLocalizer, Event } from 'react-big-calendar'
 import {format} from 'date-fns/format'
 import {parse} from 'date-fns/parse'
@@ -8,12 +8,14 @@ import {enUS} from 'date-fns/locale/en-US'
 import {addHours} from 'date-fns/addHours'
 import {startOfHour} from 'date-fns/startOfHour'
 
-import 'react-big-calendar/lib/css/react-big-calendar.css'
+import './rbc-sass/styles.scss';
+import RollingMonthView from './RollingMonthView'
 
 const locales = {
   'en-US': enUS,
 }
 const endOfHour = (date: Date): Date => addHours(startOfHour(date), 1)
+const startOfWeekMonday =  (d: Date): Date => startOfWeek(d, {weekStartsOn: 1})
 const now = new Date()
 const start = endOfHour(now)
 const end = addHours(start, 2)
@@ -21,7 +23,7 @@ const end = addHours(start, 2)
 const localizer = dateFnsLocalizer({
   format,
   parse,
-  startOfWeek,
+  startOfWeek: startOfWeekMonday,
   getDay,
   locales,
 })
@@ -36,6 +38,15 @@ const Month: FC = () => {
         end,
       },
     ]
+
+    const { views } = useMemo(
+        () => ({
+          views: {
+            month: RollingMonthView,
+          },
+        }),
+        []
+      )
   
     return (
       <Calendar
@@ -43,6 +54,7 @@ const Month: FC = () => {
         events={events}
         localizer={localizer}
         style={{ width: '100vw', height: '100vh' }}
+        views={views}
       />
     )
   }
