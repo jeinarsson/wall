@@ -6,7 +6,7 @@
   box-shadow: none;
   margin: 0;
   padding: $event-padding;
-  background-color: $event-bg;
+  
   border-radius: $event-border-radius;
   color: $event-color;
   cursor: pointer;
@@ -24,6 +24,10 @@
 
   &:focus {
     outline: 5px auto $event-outline;
+  }
+
+  &.rbc-event-allday {
+    background-color: $event-bg;
   }
 }
 

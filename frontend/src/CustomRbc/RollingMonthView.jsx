@@ -107,9 +107,6 @@ class MonthView extends React.Component {
         aria-label="Month View"
         ref={this.containerRef}
       >
-        <div className="rbc-row rbc-month-header" role="row">
-          {this.renderHeaders(weeks[0])}
-        </div>
         {weeks.map(this.renderWeek)}
         {this.props.popup && this.renderOverlay()}
       </div>
@@ -180,9 +177,14 @@ class MonthView extends React.Component {
     let { date: currentDate, getDrilldownView, localizer } = this.props
     let isOffRange = localizer.neq(date, currentDate, 'month')
     let isCurrent = localizer.isSameDate(date, currentDate)
+    const isFirstOfMonth = date.getDate() == 1;
     let drilldownView = getDrilldownView(date)
-    let label = localizer.format(date, 'dateFormat')
-    let DateHeaderComponent = this.props.components.dateHeader || DateHeader
+    let label = localizer.format(date, 'ccc, MMM dd')
+    const DefaultDateHeader = () => <>
+      <span className='rbc-date-header-day'>{localizer.format(date, 'ccc')}</span><br/>
+      {isFirstOfMonth ? localizer.format(date, 'MMM dd') : localizer.format(date, 'dd')}
+    </>
+    let DateHeaderComponent = this.props.components.dateHeader || DefaultDateHeader
 
     return (
       <div

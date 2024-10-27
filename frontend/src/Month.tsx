@@ -10,15 +10,14 @@ import {startOfHour} from 'date-fns/startOfHour'
 
 import './rbc-sass/styles.scss';
 import RollingMonthView from './CustomRbc/RollingMonthView'
+import { addDays } from 'date-fns'
 
 const locales = {
   'en-US': enUS,
 }
 const endOfHour = (date: Date): Date => addHours(startOfHour(date), 1)
 const startOfWeekMonday =  (d: Date): Date => startOfWeek(d, {weekStartsOn: 1})
-const now = new Date()
-const start = endOfHour(now)
-const end = addHours(start, 2)
+
 // The types here are `object`. Strongly consider making them better as removing `locales` caused a fatal error
 const localizer = dateFnsLocalizer({
   format,
@@ -31,11 +30,21 @@ const localizer = dateFnsLocalizer({
 
 
 const Month: FC = () => {
+    const now = new Date()
+    const start = endOfHour(now)
+    const end = addHours(start, 2)
+    const end2 = addDays(start, 2)
     const events = [
       {
         title: 'Learn cool stuff',
         start,
         end,
+      },
+      {
+        title: 'All day',
+        start: start,
+        end: end2,
+        allDay: true,
       },
     ]
 
