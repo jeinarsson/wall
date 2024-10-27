@@ -13,9 +13,10 @@ import * as animationFrame from 'dom-helpers/animationFrame'
 /* import Popup from './Popup'
 import Overlay from 'react-overlays/Overlay' */
 import PopOverlay from 'react-big-calendar/lib/PopOverlay'
-import DateContentRow from 'react-big-calendar/lib/DateContentRow'
 import Header from 'react-big-calendar/lib/Header'
 import DateHeader from 'react-big-calendar/lib/DateHeader'
+
+import DateContentRow from './DateContentRow'
 
 import { inRange, sortWeekEvents } from 'react-big-calendar/lib/utils/eventLevels'
 
@@ -35,6 +36,7 @@ function visibleDays(date, localizer) {
 
   return days
 }
+
 
 
 class MonthView extends React.Component {

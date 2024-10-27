@@ -1,6 +1,7 @@
 import Month from './Month.tsx'
 
 import './fullscreen.css';
+import './wall.css';
 
 
 function Top() {

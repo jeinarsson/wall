@@ -9,7 +9,7 @@ import {addHours} from 'date-fns/addHours'
 import {startOfHour} from 'date-fns/startOfHour'
 
 import './rbc-sass/styles.scss';
-import RollingMonthView from './RollingMonthView'
+import RollingMonthView from './CustomRbc/RollingMonthView'
 
 const locales = {
   'en-US': enUS,
@@ -55,6 +55,7 @@ const Month: FC = () => {
         localizer={localizer}
         style={{ width: '100vw', height: '100vh' }}
         views={views}
+        toolbar={false}
       />
     )
   }

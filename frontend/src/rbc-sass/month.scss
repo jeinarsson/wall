@@ -48,6 +48,8 @@
 .rbc-month-header {
   display: flex;
   flex-direction: row;
+  color: #999;
+  font-weight: 500;
 }
 
 .rbc-month-row {
@@ -73,6 +75,7 @@
 
   &.rbc-now {
     font-weight: bold;
+    text-decoration: underline; 
   }
 
   > a {
