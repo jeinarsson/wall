@@ -17,7 +17,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	events, err := c.Events(calId, time.Now(), time.Now().AddDate(0, 0, 30))
+	events, err := c.Events(ctx, calId, time.Now(), time.Now().AddDate(0, 0, 30))
 	if err != nil {
 		log.Fatal(err)
 	}

@@ -20,10 +20,10 @@ func NewClient(ctx context.Context, credFile string) (*Client, error) {
 	return &Client{s: s}, nil
 }
 
-func (c *Client) Events(calId string, from, to time.Time) ([]*calendar.Event, error) {
+func (c *Client) Events(ctx context.Context, calId string, from, to time.Time) ([]*calendar.Event, error) {
 	var all []*calendar.Event
 	for {
-		r, err := c.s.Events.List(calId).TimeMin(from.Format(time.RFC3339)).TimeMax(to.Format(time.RFC3339)).ShowDeleted(false).SingleEvents(true).OrderBy("startTime").Do()
+		r, err := c.s.Events.List(calId).Context(ctx).TimeMin(from.Format(time.RFC3339)).TimeMax(to.Format(time.RFC3339)).ShowDeleted(false).SingleEvents(true).OrderBy("startTime").Do()
 		if err != nil {
 			return nil, err
 		}
