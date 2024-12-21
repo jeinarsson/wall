@@ -33,7 +33,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	http.HandleFunc("/calendarEvents", s.getCalendarEvents)
+	http.HandleFunc("/api/calendarEvents", s.getCalendarEvents)
 	if err := http.ListenAndServe(":9000", nil); err != nil {
 		log.Fatal(err)
 	}
