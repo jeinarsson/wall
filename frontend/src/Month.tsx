@@ -7,6 +7,7 @@ import { getDay } from 'date-fns/getDay'
 import { enUS } from 'date-fns/locale/en-US'
 
 import './rbc-sass/styles.scss';
+import './month.css';
 
 // @ts-ignore
 import RollingMonthView from './CustomRbc/RollingMonthView' 
@@ -63,6 +64,20 @@ const Month: FC = () => {
         }),
         []
     )
+
+    const eventComponent = (props) => {
+        console.log(props);
+        if (props.isAllDay) {
+            return props.title;
+        }
+        const start = new Date(props.event.Start);
+        const startfmt = props.localizer.format(start, 'HH:mm');
+        return <div><span className="eventTime">{startfmt}</span> <span className="eventTitle">{props.title}</span></div>
+    }
+
+    const components = useMemo(() => ({
+        event: eventComponent, 
+      }), [])    
     return (
         <Calendar
             defaultView='month'
@@ -81,6 +96,7 @@ const Month: FC = () => {
             localizer={localizer}
             style={{ width: '100vw', height: '100vh' }}
             views={views}
+            components={components}
             toolbar={false}
         />
     )
