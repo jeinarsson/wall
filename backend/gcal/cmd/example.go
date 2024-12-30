@@ -12,11 +12,18 @@ import (
 func main() {
 	ctx := context.Background()
 
-	calId := "9me0hsfh7oc365aqf39i9j6j38@group.calendar.google.com"
 	c, err := gcal.NewClient(ctx, "../wall-gcloud.key")
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	fmt.Println("Colors:")
+	for k, v := range colors {
+		fmt.Printf("%s: %s\n", k, v)
+	}
+	fmt.Println()
+
+	calId := "9me0hsfh7oc365aqf39i9j6j38@group.calendar.google.com"
 	events, err := c.Events(ctx, calId, time.Now(), time.Now().AddDate(0, 0, 30))
 	if err != nil {
 		log.Fatal(err)
