@@ -56,6 +56,12 @@ func NewServer(ctx context.Context) (*server, error) {
 				excludeRegex: nil,
 				includeRegex: nil,
 			},
+			{
+				id:           "olmercyca@gmail.com",
+				color:        "rgb(130, 139, 194)",
+				excludeRegex: nil,
+				includeRegex: nil,
+			},
 		},
 	}, nil
 }
