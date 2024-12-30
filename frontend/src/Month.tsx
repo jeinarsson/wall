@@ -1,4 +1,4 @@
-import { FC, useMemo, useState, useEffect } from 'react'
+import { FC, useMemo, useState, useEffect, useCallback } from 'react'
 import { Calendar, dateFnsLocalizer } from 'react-big-calendar'
 import { format } from 'date-fns/format'
 import { parse } from 'date-fns/parse'
@@ -27,7 +27,6 @@ const localizer = dateFnsLocalizer({
     locales,
 })
 //@ts-ignore
-
 
 interface JsonEvent {
     Start: string;
@@ -66,14 +65,26 @@ const Month: FC = () => {
     )
 
     const eventComponent = (props) => {
-        console.log(props);
         if (props.isAllDay) {
             return props.title;
         }
         const start = new Date(props.event.Start);
         const startfmt = props.localizer.format(start, 'HH:mm');
-        return <div><span className="eventTime">{startfmt}</span> <span className="eventTitle">{props.title}</span></div>
+        return (
+        <div className="eventContainer">
+            <div className="eventCalendarIndicatorContainer"><div className="eventCalendarIndicator" style={{borderColor: props.event.Color}}></div></div>
+            <span className="eventTime">{startfmt}</span>
+            <span className="eventTitle"> {props.title}</span>
+        </div>
+        )
     }
+
+    const eventPropGetter = useCallback((event, start, end, isSelected) => {
+    if (event.AllDay) {
+        return {style: {backgroundColor: event.Color}}; 
+    }
+    return {};
+    },[]);
 
     const components = useMemo(() => ({
         event: eventComponent, 
@@ -82,6 +93,7 @@ const Month: FC = () => {
         <Calendar
             defaultView='month'
             events={eventData}
+            showAllEvents={true}
             startAccessor={(e: JsonEvent) => new Date(e.Start)}
             endAccessor={(e: JsonEvent) => {
                 let end = new Date(e.End);
@@ -97,6 +109,7 @@ const Month: FC = () => {
             style={{ width: '100vw', height: '100vh' }}
             views={views}
             components={components}
+            eventPropGetter={eventPropGetter}
             toolbar={false}
         />
     )
