@@ -1,8 +1,8 @@
 $out-of-range-color: #bbb !default;
 $out-of-range-bg-color: #222 !default;
 
-$calendar-border: #111 !default;
-$cell-border: #111 !default;
+$calendar-border: #444 !default;
+$cell-border: #444 !default;
 
 $border-color: #888 !default;
 
@@ -16,7 +16,7 @@ $date-selection-bg-color: rgba(0, 0, 0, 0.1) !default;
 $event-bg: #3174ad !default;
 $event-border: darken(#3174ad, 10%) !default;
 $event-outline: #3b99fc !default;
-$event-color: #ddd !default;
+$event-color: #ddd   !default;
 $event-border-radius: 5px !default;
 $event-padding: 2px 5px !default;
 $event-zindex: 4 !default;

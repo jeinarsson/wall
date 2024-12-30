@@ -3,7 +3,6 @@ span.eventTime {
   padding-right: 6px;
 }
 span.eventTitle  {
-  font-size: 22px;
 }
 div.eventContainer {
   display:flex;

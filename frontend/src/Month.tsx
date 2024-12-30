@@ -78,7 +78,6 @@ const Month: FC = () => {
         </div>
         )
     }
-
     const eventPropGetter = useCallback((event, start, end, isSelected) => {
     if (event.AllDay) {
         return {style: {backgroundColor: event.Color}}; 
@@ -94,13 +93,19 @@ const Month: FC = () => {
             defaultView='month'
             events={eventData}
             showAllEvents={true}
-            startAccessor={(e: JsonEvent) => new Date(e.Start)}
-            endAccessor={(e: JsonEvent) => {
-                let end = new Date(e.End);
+            startAccessor={(e: JsonEvent) => {
                 if (e.AllDay) {
-                    end = addDays(end, -1);
+                    return parse(e.Start, "yyyy-MM-dd", new Date());
                 }
-                return end;
+                return new Date(e.Start)}
+            }
+            endAccessor={(e: JsonEvent) => {
+                if (e.AllDay) {
+                    let end = parse(e.End, "yyyy-MM-dd", new Date());
+                    end = addDays(end, -1);  // RBC expects end-inclusive ranges, Google provides end-exclusive.
+                    return end;
+                }
+                return new Date(e.End);
             }
             }
             titleAccessor={(e: JsonEvent) => e.Summary}
