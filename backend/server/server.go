@@ -50,6 +50,12 @@ func NewServer(ctx context.Context) (*server, error) {
 				excludeRegex: regexp.MustCompile("Virtual"),
 				includeRegex: nil,
 			},
+			{
+				id:           "en.usa#holiday@group.v.calendar.google.com",
+				color:        "rgb(72, 145, 96)",
+				excludeRegex: nil,
+				includeRegex: nil,
+			},
 		},
 	}, nil
 }
