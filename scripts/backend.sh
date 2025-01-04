@@ -4,7 +4,7 @@ cd ../backend/server
 
 while true 
 do
-    go run server/server.go
+    go run server.go
     sleep 5
 done
 
