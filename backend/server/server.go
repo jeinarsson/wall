@@ -92,7 +92,13 @@ func (s *server) getCalendarEvents(w http.ResponseWriter, r *http.Request) {
 	jsonData := []event{}
 
 	for _, cal := range s.calendars {
-		events, err := s.gcalClient.Events(ctx, cal.id, time.Now(), time.Now().AddDate(0, 0, 30))
+		startOfWeek := time.Now()
+		for startOfWeek.Weekday() != time.Monday {
+			startOfWeek = startOfWeek.AddDate(0, 0, -1)
+		}
+		startOfWeek = startOfWeek.AddDate(0, 0, -1)
+
+		events, err := s.gcalClient.Events(ctx, cal.id, startOfWeek, startOfWeek.AddDate(0, 0, 30))
 		if err != nil {
 			log.Fatal(err)
 		}
