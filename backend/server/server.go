@@ -98,7 +98,7 @@ func (s *server) getCalendarEvents(w http.ResponseWriter, r *http.Request) {
 		}
 		startOfWeek = startOfWeek.AddDate(0, 0, -1)
 
-		events, err := s.gcalClient.Events(ctx, cal.id, startOfWeek, startOfWeek.AddDate(0, 0, 30))
+		events, err := s.gcalClient.Events(ctx, cal.id, startOfWeek, startOfWeek.AddDate(0, 0, 37))
 		if err != nil {
 			log.Fatal(err)
 		}
