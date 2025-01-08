@@ -39,8 +39,8 @@ func NewServer(ctx context.Context) (*server, error) {
 				includeRegex: nil,
 			},
 			{
-				id:           "b7cjs8ctbcthr18qcudua43k2o@group.calendar.google.com",
-				color:        "rgb(216, 190, 94)",
+				id:           "b7cjs8ctbcthr18qcudua43k2o@group.calendar.google.com", // Birthdays
+				color:        "rgb(216, 27, 96)",
 				excludeRegex: nil,
 				includeRegex: nil,
 			},
@@ -59,6 +59,18 @@ func NewServer(ctx context.Context) (*server, error) {
 			{
 				id:           "olmercyca@gmail.com",
 				color:        "rgb(130, 139, 194)",
+				excludeRegex: nil,
+				includeRegex: nil,
+			},
+			{
+				id:           "7deb7cecd8491b54ca0717a23a6d9ee1208f4d466b2967be89d4031c99ccea09@group.calendar.google.com", // WSTC Jonas
+				color:        "rgb(231, 186, 81)",
+				excludeRegex: nil,
+				includeRegex: nil,
+			},
+			{
+				id:           "e66e8bc9e4f80d9e2d9332ce988c9972efbe845f20324ffb7c6fc4368b0d4193@group.calendar.google.com", // WSTC Tora
+				color:        "rgb(216, 190, 94)",
 				excludeRegex: nil,
 				includeRegex: nil,
 			},
