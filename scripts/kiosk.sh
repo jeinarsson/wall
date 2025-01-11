@@ -9,7 +9,7 @@ while true
 do
     wget -q --spider http://google.com
     if [ $? -eq 0 ]; then
-        sleep 10
+        sleep 20
         continue
     fi
 
@@ -20,7 +20,8 @@ do
     sleep 5
     echo 'turning back on..'
     nmcli radio wifi on
-    sleep 5
+    echo 'waiting 30s...'
+    sleep 30
 done
 
 
