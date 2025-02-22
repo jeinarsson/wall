@@ -74,6 +74,12 @@ func NewServer(ctx context.Context) (*server, error) {
 				excludeRegex: nil,
 				includeRegex: nil,
 			},
+			{
+				id:           "5c4b566891ba1cfcc5019ee8c44436cb62e65b754468147e28127ee1975aabf1@group.calendar.google.com", // WSTC Tora 2
+				color:        "rgb(188, 194, 86)",
+				excludeRegex: nil,
+				includeRegex: nil,
+			},
 		},
 	}, nil
 }
