@@ -45,7 +45,7 @@ func NewServer(ctx context.Context) (*server, error) {
 				includeRegex: nil,
 			},
 			{
-				id:           "soi6307ajh45fdn2j3i1f1lhe6j5fi7i@import.calendar.google.com",
+				id:           "792b9cd027ad35454d995f575d539c29d7f46a6b94b4903655193c3287770819@group.calendar.google.com",
 				color:        "rgb(149, 115, 103)",
 				excludeRegex: regexp.MustCompile("Virtual"),
 				includeRegex: nil,
@@ -118,7 +118,8 @@ func (s *server) getCalendarEvents(w http.ResponseWriter, r *http.Request) {
 
 		events, err := s.gcalClient.Events(ctx, cal.id, startOfWeek, startOfWeek.AddDate(0, 0, 37))
 		if err != nil {
-			log.Fatal(err)
+			log.Printf("fetching events for calendar %s: %v", cal.id, err)
+			continue
 		}
 		for _, item := range events {
 			if cal.excludeRegex != nil {
