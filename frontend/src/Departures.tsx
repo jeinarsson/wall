@@ -52,7 +52,9 @@ function Row({ d, board, now }: { d: Departure, board: Board, now: Date }) {
           {lateness && <span className={`departure-expected ${lateness}`}>{format(time, 'HH:mm')}</span>}
         </span>
       )}
-      {board.ShowDestination && <span className="departure-destination">{d.Destination}</span>}
+      {board.ShowDestination && (
+        <span className={`departure-destination${board.ShowSchedule ? '' : ' wide'}`}>{d.Destination}</span>
+      )}
       <span className="departure-minutes">
         {minutes < 1 ? 'now' : <>{minutes}<span className="departure-unit">min</span></>}
       </span>
@@ -87,9 +89,8 @@ function Departures() {
         if (upcoming.length === 0) {
           return null
         }
-        const columns = 2 + Number(board.ShowSchedule) + Number(board.ShowDestination)
         return (
-          <div className="departure-board" key={board.Name} style={{ gridTemplateColumns: `repeat(${columns}, auto)` }}>
+          <div className="departure-board" key={board.Name}>
             {upcoming.map(d => <Row key={d.Time + d.Route + d.Destination} d={d} board={board} now={now} />)}
           </div>
         )

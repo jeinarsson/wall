@@ -73,9 +73,11 @@ func NewServer(ctx context.Context, keyPath, cacheDir string) (*server, error) {
 		feeds:      []*transit.Feed{ace, bdfm, lirrFeed},
 		boards: []*board{
 			{
-				name:  "subway",
-				count: 3,
-				feeds: []*transit.Feed{ace, bdfm},
+				name:            "subway",
+				count:           3,
+				showSchedule:    true,
+				showDestination: true,
+				feeds:           []*transit.Feed{ace, bdfm},
 				// Forest Hills-71 Av. On Queens Blvd "S" is towards Manhattan.
 				filter: transit.Filter{StopID: "G08S", Routes: []string{"E", "F"}},
 			},

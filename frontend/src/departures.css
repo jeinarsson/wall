@@ -4,30 +4,38 @@
   position: absolute;
   left: 4vh;
   bottom: 4vh;
-  display: flex;
-  flex-direction: column;
-  gap: 1.6vh;
   font-family: var(--font-sans);
   font-size: 2.2vh;
   color: var(--text-muted);
-}
 
-.departure-board {
+  /* One grid for all boards so the columns line up: bullet, time,
+     destination, minutes. Boards and rows just place cells on it. */
   display: grid;
-  justify-content: start;
+  width: max-content;
+  /* The destination column takes up any slack, so a long subway
+     destination spanning into the time column doesn't push the LIRR
+     destinations away from their times. */
+  grid-template-columns: auto auto 1fr auto;
   align-items: center;
   gap: 0.7vh 0.8em;
   line-height: 1;
 }
 
-/* Rows lay out on the board's grid so the columns line up. */
+.departure-board,
 .departure {
   display: contents;
 }
 
+/* Space between boards. */
+.departure-board + .departure-board::before {
+  content: '';
+  grid-column: 1 / -1;
+  height: 0.6vh;
+}
+
 /* MTA route bullet; for LIRR branches just a small dot in the branch color. */
 .departure-bullet {
-  flex: none;
+  grid-column: 1;
   width: 1.3em;
   height: 1.3em;
   border-radius: 50%;
@@ -46,6 +54,8 @@
 }
 
 .departure-time {
+  grid-column: 2;
+  white-space: nowrap;
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
@@ -63,10 +73,17 @@
 }
 
 .departure-destination {
+  grid-column: 3;
   color: var(--text-faint);
 }
 
+/* Without a time column, the destination takes its place too. */
+.departure-destination.wide {
+  grid-column: 2 / 4;
+}
+
 .departure-minutes {
+  grid-column: 4;
   text-align: right;
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
