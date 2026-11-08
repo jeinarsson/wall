@@ -145,15 +145,6 @@
   color: var(--text-faint);
 }
 
-.rbc-now .rbc-date-number {
-  margin-left: -7px;
-  padding: 1px 7px;
-  border-radius: 4px;
-  background-color: var(--accent);
-  color: var(--accent-ink);
-  font-weight: 700;
-}
-
 /* Events. */
 
 .rbc-row-segment {

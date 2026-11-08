@@ -1,6 +1,6 @@
 /* Shared palette and type for both wall screens. Everything sits on near-black
    with warm, low-contrast greys; amber is the only accent and is used sparingly
-   (clock hours, today's date). */
+   (clock hours, month labels). */
 :root {
   --bg: #0b0b0c;
   --bg-weekend: #0f0f11;
@@ -13,7 +13,6 @@
   --text-faint: #56534e;
 
   --accent: #dcaa55;
-  --accent-ink: #141109;
 
   --font-sans: 'Inter Variable', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono Variable', ui-monospace, monospace;
