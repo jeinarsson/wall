@@ -1,0 +1,131 @@
+package main
+
+import (
+	"encoding/json"
+	"net/http"
+	"slices"
+	"sort"
+	"time"
+
+	"github.com/jeinarsson/wall/transit"
+)
+
+// subwaySign is a countdown sign for one subway platform, like the ones at
+// station entrances: the next few trains on each route, plus any service
+// alerts that affect the ride.
+type subwaySign struct {
+	platform string   // GTFS stop id, including direction: "G08S"
+	routes   []string // in display order
+	alerts   transit.AlertFilter
+	// alertBoroughs adds every station in these boroughs (as in
+	// Stations.csv: "M", "Bk", ...) to alerts.Stops.
+	alertBoroughs []string
+
+	trips      []*transit.TripFeed
+	alertFeed  *transit.AlertFeed
+	routeNames *transit.File[map[string]transit.Route]
+	stations   *transit.File[map[string]transit.Station]
+}
+
+type subwayJSON struct {
+	Routes []subwayRouteJSON
+	Alerts []alertJSON
+	// Colors has all subway routes, for the "[E]"s in alert texts.
+	Colors map[string]colorJSON
+}
+
+type subwayRouteJSON struct {
+	Route string
+	colorJSON
+	Times []time.Time
+}
+
+type colorJSON struct {
+	Color     string
+	TextColor string
+}
+
+type alertJSON struct {
+	Text   string
+	Severe bool
+}
+
+func (s *subwaySign) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	now := time.Now()
+
+	var stopTimes []transit.StopTime
+	for _, f := range s.trips {
+		if msg, ok := f.Get(now); ok {
+			stopTimes = append(stopTimes, transit.StopTimes(msg, s.platform)...)
+		}
+	}
+	routes, _ := s.routeNames.Get()
+	alerts, _ := s.alertFeed.Get(now)
+	filter := s.alerts
+	if stations, ok := s.stations.Get(); ok {
+		filter.Stops = append(slices.Clip(filter.Stops), stationsIn(stations, s.alertBoroughs)...)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(s.board(stopTimes, routes, alerts, filter, now))
+}
+
+// board lists the upcoming trains on s.routes in stopTimes and the alerts
+// that match filter.
+func (s *subwaySign) board(stopTimes []transit.StopTime, routes map[string]transit.Route, alerts []transit.Alert, filter transit.AlertFilter, now time.Time) subwayJSON {
+	board := subwayJSON{Routes: []subwayRouteJSON{}, Alerts: []alertJSON{}, Colors: map[string]colorJSON{}}
+	for id, r := range routes {
+		board.Colors[id] = routeColor(r)
+	}
+	for _, id := range s.routes {
+		row := subwayRouteJSON{Route: id, colorJSON: routeColor(routes[id]), Times: []time.Time{}}
+		for _, st := range stopTimes {
+			if st.RouteID == id && !st.Canceled && st.Time.After(now) {
+				row.Times = append(row.Times, st.Time)
+			}
+		}
+		slices.SortFunc(row.Times, time.Time.Compare)
+		board.Routes = append(board.Routes, row)
+	}
+	board.Alerts = matchingAlerts(alerts, filter, now)
+	return board
+}
+
+// stationsIn returns the ids of the stations in any of boroughs.
+func stationsIn(stations map[string]transit.Station, boroughs []string) []string {
+	var ids []string
+	for id, st := range stations {
+		if slices.Contains(boroughs, st.Borough) {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+func routeColor(r transit.Route) colorJSON {
+	c := colorJSON{Color: "#808080", TextColor: "#FFFFFF"}
+	if r.Color != "" {
+		c.Color = "#" + r.Color
+	}
+	if r.TextColor != "" {
+		c.TextColor = "#" + r.TextColor
+	}
+	return c
+}
+
+// matchingAlerts returns the alerts that match filter, most severe first.
+func matchingAlerts(alerts []transit.Alert, filter transit.AlertFilter, now time.Time) []alertJSON {
+	var matched []transit.Alert
+	for _, a := range alerts {
+		if filter.Match(a, now) {
+			matched = append(matched, a)
+		}
+	}
+	sort.SliceStable(matched, func(i, j int) bool { return matched[i].Severity > matched[j].Severity })
+	out := []alertJSON{}
+	for _, a := range matched {
+		out = append(out, alertJSON{Text: a.Text, Severe: severeAlerts.MatchString(a.Type)})
+	}
+	return out
+}

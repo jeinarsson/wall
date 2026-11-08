@@ -12,18 +12,6 @@ import (
 	"time"
 
 	"github.com/jeinarsson/wall/gcal"
-	"github.com/jeinarsson/wall/transit"
-)
-
-const (
-	// Static GTFS, for stop names and route colors.
-	staticSubway = "https://rrgtfsfeeds.s3.amazonaws.com/gtfs_subway.zip"
-	staticLIRR   = "https://rrgtfsfeeds.s3.amazonaws.com/gtfslirr.zip"
-
-	// Realtime GTFS.
-	feedACE  = "https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/nyct%2Fgtfs-ace"
-	feedBDFM = "https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/nyct%2Fgtfs-bdfm"
-	feedLIRR = "https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/lirr%2Fgtfs-lirr"
 )
 
 type calendar struct {
@@ -33,22 +21,10 @@ type calendar struct {
 	includeRegex *regexp.Regexp
 }
 
-// board is a list of departures shown on the wall.
-type board struct {
-	name            string
-	count           int // how many departures to show
-	showSchedule    bool
-	showDestination bool
-	feeds           []*transit.Feed
-	filter          transit.Filter
-}
-
 type server struct {
 	gcalClient *gcal.Client
 	calendars  []*calendar
-	statics    []*transit.StaticFeed
-	feeds      []*transit.Feed
-	boards     []*board
+	trains     *trains
 }
 
 func NewServer(ctx context.Context, keyPath, cacheDir string) (*server, error) {
@@ -57,40 +33,14 @@ func NewServer(ctx context.Context, keyPath, cacheDir string) (*server, error) {
 		return nil, err
 	}
 
-	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+	t, err := newTrains(cacheDir)
+	if err != nil {
 		return nil, err
 	}
-	subway := transit.NewStaticFeed(staticSubway, filepath.Join(cacheDir, "gtfs_subway.zip"))
-	lirr := transit.NewStaticFeed(staticLIRR, filepath.Join(cacheDir, "gtfs_lirr.zip"))
-	ace := transit.NewFeed(feedACE, subway)
-	bdfm := transit.NewFeed(feedBDFM, subway)
-	lirrFeed := transit.NewFeed(feedLIRR, lirr)
-	westbound := uint32(1)
 
 	return &server{
 		gcalClient: c,
-		statics:    []*transit.StaticFeed{subway, lirr},
-		feeds:      []*transit.Feed{ace, bdfm, lirrFeed},
-		boards: []*board{
-			{
-				name:            "subway",
-				count:           3,
-				showSchedule:    true,
-				showDestination: true,
-				feeds:           []*transit.Feed{ace, bdfm},
-				// Forest Hills-71 Av. On Queens Blvd "S" is towards Manhattan.
-				filter: transit.Filter{StopID: "G08S", Routes: []string{"E", "F"}},
-			},
-			{
-				name:            "lirr",
-				count:           2,
-				showSchedule:    true,
-				showDestination: true,
-				feeds:           []*transit.Feed{lirrFeed},
-				// Forest Hills, towards Penn Station / Grand Central.
-				filter: transit.Filter{StopID: "55", DirectionID: &westbound},
-			},
-		},
+		trains:     t,
 		calendars: []*calendar{
 			{
 				id:           "9me0hsfh7oc365aqf39i9j6j38@group.calendar.google.com",
@@ -156,15 +106,11 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	for _, f := range s.statics {
-		go f.Poll(ctx, 24*time.Hour)
-	}
-	for _, f := range s.feeds {
-		go f.Poll(ctx, time.Minute)
-	}
+	s.trains.poll(ctx)
 
 	http.HandleFunc("/api/calendarEvents", s.getCalendarEvents)
-	http.HandleFunc("/api/departures", s.getDepartures)
+	http.Handle("/api/subway", s.trains.subway)
+	http.Handle("/api/lirr", s.trains.lirr)
 	if *staticDir != "" {
 		http.Handle("/", spaHandler(*staticDir))
 	}
@@ -244,53 +190,6 @@ func (s *server) getCalendarEvents(w http.ResponseWriter, r *http.Request) {
 				Color:   cal.color,
 			})
 		}
-	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(jsonData)
-}
-
-func (s *server) getDepartures(w http.ResponseWriter, r *http.Request) {
-	type departure struct {
-		Route       string // short name, empty for LIRR branches
-		RouteName   string
-		Color       string
-		TextColor   string
-		Destination string
-		Time        time.Time // expected
-		Scheduled   time.Time
-		Delay       int // seconds
-	}
-	type boardJSON struct {
-		Name            string
-		Count           int
-		ShowSchedule    bool
-		ShowDestination bool
-		Departures      []departure
-	}
-	jsonData := []boardJSON{}
-
-	now := time.Now()
-	for _, b := range s.boards {
-		bj := boardJSON{
-			Name:            b.name,
-			Count:           b.count,
-			ShowSchedule:    b.showSchedule,
-			ShowDestination: b.showDestination,
-			Departures:      []departure{},
-		}
-		for _, d := range transit.Departures(b.feeds, b.filter, now) {
-			bj.Departures = append(bj.Departures, departure{
-				Route:       d.Route.ShortName,
-				RouteName:   d.Route.LongName,
-				Color:       "#" + d.Route.Color,
-				TextColor:   "#" + d.Route.TextColor,
-				Destination: d.Destination,
-				Time:        d.Time,
-				Scheduled:   d.Scheduled(),
-				Delay:       int(d.Delay.Seconds()),
-			})
-		}
-		jsonData = append(jsonData, bj)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(jsonData)

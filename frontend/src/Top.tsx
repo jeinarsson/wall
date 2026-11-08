@@ -3,7 +3,8 @@ import { format } from 'date-fns/format'
 import { getISOWeek } from 'date-fns/getISOWeek'
 
 import Contours from './Contours.tsx'
-import Departures from './Departures.tsx'
+import Lirr from './Lirr.tsx'
+import Subway from './Subway.tsx'
 
 import './clock.css';
 
@@ -34,7 +35,10 @@ function Top() {
           <span className="clock-week">week {getISOWeek(now)}</span>
         </div>
       </div>
-      <Departures />
+      <div className="transit">
+        <Subway title="Subway" src="/api/subway" count={3} maxAlerts={2} />
+        <Lirr title="LIRR" src="/api/lirr" count={3} maxAlerts={2} />
+      </div>
     </div>
   )
 }
