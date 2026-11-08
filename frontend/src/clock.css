@@ -45,7 +45,6 @@
 
 .clock-minutes {
   color: var(--text);
-  font-style: italic;
 }
 
 .clock-date {

@@ -8,7 +8,6 @@ import {
 import '@fontsource-variable/inter';
 import '@fontsource-variable/jetbrains-mono';
 import '@fontsource-variable/fraunces/full.css';
-import '@fontsource-variable/fraunces/full-italic.css';
 
 import './normalize.css';
 import './theme.css';
