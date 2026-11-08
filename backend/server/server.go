@@ -3,8 +3,11 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"regexp"
 	"time"
 
@@ -23,8 +26,8 @@ type server struct {
 	calendars  []*calendar
 }
 
-func NewServer(ctx context.Context) (*server, error) {
-	c, err := gcal.NewClient(ctx, "../wall-gcloud.key")
+func NewServer(ctx context.Context, keyPath string) (*server, error) {
+	c, err := gcal.NewClient(ctx, keyPath)
 	if err != nil {
 		return nil, err
 	}
@@ -85,16 +88,40 @@ func NewServer(ctx context.Context) (*server, error) {
 }
 
 func main() {
+	keyPath := flag.String("key", "../wall-gcloud.key", "path to Google Cloud service account key")
+	staticDir := flag.String("static", "", "directory with the built frontend to serve on /")
+	addr := flag.String("addr", ":9000", "address to listen on")
+	flag.Parse()
+
 	ctx := context.Background()
-	s, err := NewServer(ctx)
+	s, err := NewServer(ctx, *keyPath)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	http.HandleFunc("/api/calendarEvents", s.getCalendarEvents)
-	if err := http.ListenAndServe(":9000", nil); err != nil {
+	if *staticDir != "" {
+		http.Handle("/", spaHandler(*staticDir))
+	}
+	log.Printf("listening on %s", *addr)
+	if err := http.ListenAndServe(*addr, nil); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// spaHandler serves files from dir, falling back to index.html so that
+// client-side routes like /top and /bottom work.
+func spaHandler(dir string) http.Handler {
+	files := http.FileServer(http.Dir(dir))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			if _, err := os.Stat(filepath.Join(dir, filepath.Clean(r.URL.Path))); err != nil {
+				http.ServeFile(w, r, filepath.Join(dir, "index.html"))
+				return
+			}
+		}
+		files.ServeHTTP(w, r)
+	})
 }
 
 func (s *server) getCalendarEvents(w http.ResponseWriter, r *http.Request) {
@@ -153,6 +180,6 @@ func (s *server) getCalendarEvents(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 	}
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(jsonData)
-	w.Header().Add("Content-Type", "application/json")
 }
