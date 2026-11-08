@@ -107,6 +107,9 @@ class MonthView extends React.Component {
         aria-label="Month View"
         ref={this.containerRef}
       >
+        <div className="rbc-row rbc-month-header" role="row">
+          {this.renderHeaders(weeks[0])}
+        </div>
         {weeks.map(this.renderWeek)}
         {this.props.popup && this.renderOverlay()}
       </div>
@@ -174,15 +177,14 @@ class MonthView extends React.Component {
   }
 
   readerDateHeading = ({ date, className, ...props }) => {
-    let { date: currentDate, getDrilldownView, localizer } = this.props
-    let isOffRange = localizer.neq(date, currentDate, 'month')
-    let isCurrent = localizer.isSameDate(date, currentDate)
+    let { getNow, getDrilldownView, localizer } = this.props
+    let isPast = localizer.lt(date, getNow(), 'day')
     const isFirstOfMonth = date.getDate() == 1;
     let drilldownView = getDrilldownView(date)
     let label = localizer.format(date, 'ccc, MMM dd')
     const DefaultDateHeader = () => <>
-      <span className='rbc-date-header-day'>{localizer.format(date, 'ccc')}</span><br/>
-      {isFirstOfMonth ? localizer.format(date, 'MMM dd') : localizer.format(date, 'dd')}
+      <span className='rbc-date-number'>{localizer.format(date, 'd')}</span>
+      {isFirstOfMonth && <span className='rbc-date-month'>{localizer.format(date, 'MMMM')}</span>}
     </>
     let DateHeaderComponent = this.props.components.dateHeader || DefaultDateHeader
 
@@ -191,8 +193,8 @@ class MonthView extends React.Component {
         {...props}
         className={clsx(
           className,
-          isOffRange && 'rbc-off-range',
-          isCurrent && 'rbc-current'
+          isPast && 'rbc-past',
+          isFirstOfMonth && 'rbc-first-of-month'
         )}
         role="cell"
       >
@@ -200,7 +202,6 @@ class MonthView extends React.Component {
           label={label}
           date={date}
           drilldownView={drilldownView}
-          isOffRange={isOffRange}
           onDrillDown={(e) => this.handleHeadingClick(date, drilldownView, e)}
         />
       </div>

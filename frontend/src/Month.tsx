@@ -1,12 +1,12 @@
-import { FC, useMemo, useState, useEffect, useCallback } from 'react'
-import { Calendar, dateFnsLocalizer } from 'react-big-calendar'
+import { FC, useMemo, useState, useEffect, useCallback, CSSProperties } from 'react'
+import { Calendar, dateFnsLocalizer, EventProps } from 'react-big-calendar'
 import { format } from 'date-fns/format'
 import { parse } from 'date-fns/parse'
 import { startOfWeek } from 'date-fns/startOfWeek'
+import { startOfDay } from 'date-fns/startOfDay'
 import { getDay } from 'date-fns/getDay'
 import { enUS } from 'date-fns/locale/en-US'
 
-import './rbc-sass/styles.scss';
 import './month.css';
 
 // @ts-ignore
@@ -26,18 +26,50 @@ const localizer = dateFnsLocalizer({
     getDay,
     locales,
 })
-//@ts-ignore
 
 interface JsonEvent {
     Start: string;
     End: string;
     Summary: string;
     AllDay: boolean;
+    Color: string;
+}
+
+const eventStart = (e: JsonEvent): Date => {
+    if (e.AllDay) {
+        return parse(e.Start, "yyyy-MM-dd", new Date());
+    }
+    return new Date(e.Start);
+}
+
+const eventEnd = (e: JsonEvent): Date => {
+    if (e.AllDay) {
+        const end = parse(e.End, "yyyy-MM-dd", new Date());
+        return addDays(end, -1);  // RBC expects end-inclusive ranges, Google provides end-exclusive.
+    }
+    return new Date(e.End);
+}
+
+const EventContent: FC<EventProps<JsonEvent>> = ({ event, title, isAllDay, continuesPrior }) => {
+    if (isAllDay || continuesPrior) {
+        return <span className="event-title">{title}</span>;
+    }
+    return (
+        <>
+            <span className="event-dot"></span>
+            <span className="event-time">{format(eventStart(event), 'HH:mm')}</span>
+            <span className="event-title">{title}</span>
+        </>
+    )
+}
+
+const components = {
+    event: EventContent,
 }
 
 const Month: FC = () => {
     const [now, setNow] = useState(new Date());
-    const [eventData, setEventData] = useState([]);
+    const [eventData, setEventData] = useState<JsonEvent[]>([]);
 
     const fetchEvents = () => {
         fetch('/api/calendarEvents')
@@ -64,50 +96,29 @@ const Month: FC = () => {
         []
     )
 
-    const eventComponent = (props) => {
-        if (props.isAllDay) {
-            return props.title;
-        }
-        const start = new Date(props.event.Start);
-        const startfmt = props.localizer.format(start, 'HH:mm');
-        return (
-        <div className="eventContainer">
-            <div className="eventCalendarIndicatorContainer"><div className="eventCalendarIndicator" style={{borderColor: props.event.Color}}></div></div>
-            <span className="eventTime">{startfmt}</span>
-            <span className="eventTitle"> {props.title}</span>
-        </div>
-        )
-    }
-    const eventPropGetter = useCallback((event, start, end, isSelected) => {
-    if (event.AllDay) {
-        return {style: {backgroundColor: event.Color}}; 
-    }
-    return {};
-    },[]);
+    // Each event carries its calendar colour as a CSS variable; month.css decides how to use it.
+    const today = startOfDay(now).getTime();
+    const eventPropGetter = useCallback((event: JsonEvent) => ({
+        className: eventEnd(event).getTime() < today ? 'event-past' : undefined,
+        style: { '--event-color': event.Color } as CSSProperties,
+    }), [today]);
 
-    const components = useMemo(() => ({
-        event: eventComponent, 
-      }), [])    
+    const dayPropGetter = useCallback((date: Date) => {
+        const day = date.getDay();
+        return { className: day === 0 || day === 6 ? 'rbc-weekend' : undefined };
+    }, []);
+
     return (
         <Calendar
-            defaultView='month'
+            view='month'
+            onView={() => {}}
+            date={now}
+            onNavigate={() => {}}
+            getNow={() => now}
             events={eventData}
             showAllEvents={true}
-            startAccessor={(e: JsonEvent) => {
-                if (e.AllDay) {
-                    return parse(e.Start, "yyyy-MM-dd", new Date());
-                }
-                return new Date(e.Start)}
-            }
-            endAccessor={(e: JsonEvent) => {
-                if (e.AllDay) {
-                    let end = parse(e.End, "yyyy-MM-dd", new Date());
-                    end = addDays(end, -1);  // RBC expects end-inclusive ranges, Google provides end-exclusive.
-                    return end;
-                }
-                return new Date(e.End);
-            }
-            }
+            startAccessor={eventStart}
+            endAccessor={eventEnd}
             titleAccessor={(e: JsonEvent) => e.Summary}
             allDayAccessor={(e: JsonEvent) => e.AllDay}
             localizer={localizer}
@@ -115,6 +126,7 @@ const Month: FC = () => {
             views={views}
             components={components}
             eventPropGetter={eventPropGetter}
+            dayPropGetter={dayPropGetter}
             toolbar={false}
         />
     )

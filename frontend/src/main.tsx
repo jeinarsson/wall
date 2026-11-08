@@ -5,20 +5,13 @@ import {
   RouterProvider,
 } from "react-router-dom";
 
-import '@fontsource/roboto/100-italic.css';
-import '@fontsource/roboto/300-italic.css';
-import '@fontsource/roboto/400-italic.css';
-import '@fontsource/roboto/500-italic.css';
-import '@fontsource/roboto/700-italic.css';
-import '@fontsource/roboto/900-italic.css';
-import '@fontsource/roboto/100.css';
-import '@fontsource/roboto/300.css';
-import '@fontsource/roboto/400.css';
-import '@fontsource/roboto/500.css';
-import '@fontsource/roboto/700.css';
-import '@fontsource/roboto/900.css';
+import '@fontsource-variable/inter';
+import '@fontsource-variable/jetbrains-mono';
+import '@fontsource-variable/fraunces/full.css';
+import '@fontsource-variable/fraunces/full-italic.css';
 
 import './normalize.css';
+import './theme.css';
 
 import Bottom from './Bottom.tsx'
 import Top from './Top.tsx'

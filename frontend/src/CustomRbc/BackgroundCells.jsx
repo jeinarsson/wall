@@ -60,7 +60,7 @@ class BackgroundCells extends React.Component {
                   localizer.isSameDate(date, current) && 'rbc-today',
                   currentDate &&
                     localizer.gt(currentDate, date, 'day') &&
-                    'rbc-off-range-bg'
+                    'rbc-past-bg'
                 )}
               />
             </Wrapper>

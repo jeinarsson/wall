@@ -1,20 +1,241 @@
-span.eventTime {
-  font-size:18px;
-  padding-right: 6px;
+/* Rolling month view. The layout rules mirror what react-big-calendar's own
+   stylesheet does for the month view; everything else is the wall theme. */
+
+.rbc-calendar {
+  --cell-pad: 7px;
+  --event-size: 19px;
+  --time-size: 15px;
+
+  box-sizing: border-box;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  font-size: var(--event-size);
+  user-select: none;
 }
-span.eventTitle  {
+
+.rbc-calendar *,
+.rbc-calendar *::before,
+.rbc-calendar *::after {
+  box-sizing: inherit;
 }
-div.eventContainer {
-  display:flex;
-  align-items: center;
+
+.rbc-month-view {
+  flex: 1 0 0;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
 }
-div.eventCalendarIndicatorContainer {
-  display:flex;
-  padding-right:4px;
+
+.rbc-row {
+  display: flex;
+  flex-direction: row;
 }
-div.eventCalendarIndicator {
-  border: 4px solid;
-  border-radius: 8px;
-  width:0;
-  height:0;
+
+/* Weekday names, shown once above the grid. */
+
+.rbc-month-header {
+  flex: none;
+  border-bottom: 1px solid var(--line-strong);
+}
+
+.rbc-header {
+  flex: 1 0 0%;
+  padding: 9px var(--cell-pad) 7px;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+/* Week rows and day cells. */
+
+.rbc-month-row {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1 0 0;
+  flex-basis: 0px;
+  overflow: hidden;
+}
+
+.rbc-month-row + .rbc-month-row {
+  border-top: 1px solid var(--line);
+}
+
+/* The current week matters most, so it gets a little more room. */
+.rbc-month-header + .rbc-month-row {
+  flex-grow: 1.25;
+}
+
+.rbc-row-bg {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+.rbc-day-bg {
+  flex: 1 0 0%;
+}
+
+.rbc-day-bg + .rbc-day-bg {
+  border-left: 1px solid var(--line);
+}
+
+.rbc-day-bg.rbc-weekend {
+  background-color: var(--bg-weekend);
+}
+
+.rbc-day-bg.rbc-today {
+  background-color: var(--bg-today);
+}
+
+.rbc-row-content {
+  position: relative;
+  z-index: 4;
+}
+
+.rbc-row-content-scrollable {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* Nothing can scroll on a wall, so busy days fade out at the bottom instead
+   of ending in a half-cut line. */
+.rbc-row-content-scroll-container {
+  height: 100%;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 16px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 16px), transparent);
+}
+
+/* Date numbers. */
+
+.rbc-date-cell {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 6px var(--cell-pad) 3px;
+  display: flex;
+  align-items: baseline;
+  gap: 0.5em;
+  white-space: nowrap;
+}
+
+.rbc-date-number {
+  font-family: var(--font-mono);
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.rbc-date-month {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.rbc-past .rbc-date-number {
+  color: var(--text-faint);
+}
+
+.rbc-now .rbc-date-number {
+  margin-left: -7px;
+  padding: 1px 7px;
+  border-radius: 4px;
+  background-color: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 700;
+}
+
+/* Events. */
+
+.rbc-row-segment {
+  padding: 0 2px 2px;
+  min-width: 0;
+}
+
+.rbc-event {
+  position: relative;
+  isolation: isolate;
+  width: 100%;
+  padding: 1px 5px;
+  border-radius: 3px;
+  color: var(--text);
+  line-height: 1.25;
+}
+
+.rbc-event-content {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.event-dot {
+  flex: none;
+  align-self: center;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background-color: var(--event-color);
+}
+
+.event-time {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: var(--time-size);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.event-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  letter-spacing: -0.005em;
+}
+
+/* All-day and multi-day events are bars, tinted with the calendar colour and
+   marked with a solid edge where they start. */
+
+.rbc-event-allday::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background-color: var(--event-color);
+  opacity: 0.26;
+}
+
+.rbc-event-allday {
+  box-shadow: inset 3px 0 0 var(--event-color);
+}
+
+.rbc-event-allday .event-dot {
+  display: none;
+}
+
+.rbc-event-continues-prior {
+  box-shadow: none;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+.rbc-event-continues-after {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.event-past {
+  opacity: 0.4;
 }

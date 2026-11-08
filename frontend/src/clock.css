@@ -1,0 +1,65 @@
+.clock-screen {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.contours {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.clock {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* Fraunces at its largest optical size, slightly softened. */
+.clock-time {
+  font-family: var(--font-display);
+  font-size: 36vh;
+  font-weight: 400;
+  font-variation-settings: 'SOFT' 50;
+  line-height: 1;
+  display: flex;
+  align-items: baseline;
+}
+
+.clock-hours {
+  color: var(--accent);
+}
+
+.clock-sep {
+  color: var(--line-strong);
+  margin: 0 0.04em;
+  position: relative;
+  top: -0.06em;
+}
+
+.clock-minutes {
+  color: var(--text);
+  font-style: italic;
+}
+
+.clock-date {
+  margin-top: 3vh;
+  font-family: var(--font-display);
+  font-size: 3.4vh;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.clock-week {
+  margin-left: 1.2em;
+  padding-left: 1.2em;
+  border-left: 1px solid var(--line-strong);
+  color: var(--text-faint);
+}
