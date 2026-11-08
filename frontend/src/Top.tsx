@@ -3,6 +3,7 @@ import { format } from 'date-fns/format'
 import { getISOWeek } from 'date-fns/getISOWeek'
 
 import Contours from './Contours.tsx'
+import Departures from './Departures.tsx'
 
 import './clock.css';
 
@@ -33,6 +34,7 @@ function Top() {
           <span className="clock-week">week {getISOWeek(now)}</span>
         </div>
       </div>
+      <Departures />
     </div>
   )
 }

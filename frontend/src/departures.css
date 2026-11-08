@@ -1,0 +1,81 @@
+/* Next trains, tucked into the bottom-left corner of the clock screen. Kept
+   in the muted greys; only the route bullets and delays carry color. */
+.departures {
+  position: absolute;
+  left: 4vh;
+  bottom: 4vh;
+  display: flex;
+  flex-direction: column;
+  gap: 1.6vh;
+  font-family: var(--font-sans);
+  font-size: 2.2vh;
+  color: var(--text-muted);
+}
+
+.departure-board {
+  display: grid;
+  justify-content: start;
+  align-items: center;
+  gap: 0.7vh 0.8em;
+  line-height: 1;
+}
+
+/* Rows lay out on the board's grid so the columns line up. */
+.departure {
+  display: contents;
+}
+
+/* MTA route bullet; for LIRR branches just a small dot in the branch color. */
+.departure-bullet {
+  flex: none;
+  width: 1.3em;
+  height: 1.3em;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85em;
+  font-weight: 600;
+  opacity: 0.85;
+}
+
+.departure-dot {
+  width: 0.55em;
+  height: 0.55em;
+  border-radius: 50%;
+}
+
+.departure-time {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.departure-expected {
+  margin-left: 0.5em;
+}
+
+.departure-expected.late {
+  color: #e39a3b;
+}
+
+.departure-expected.very-late {
+  color: #d9584a;
+}
+
+.departure-destination {
+  color: var(--text-faint);
+}
+
+.departure-minutes {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.departure-unit {
+  margin-left: 0.25em;
+  font-family: var(--font-sans);
+  font-size: 0.8em;
+  color: var(--text-faint);
+}
