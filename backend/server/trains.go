@@ -26,6 +26,9 @@ const (
 	feedLIRR     = "https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/lirr%2Fgtfs-lirr"
 	subwayAlerts = "https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/camsys%2Fsubway-alerts.json"
 	lirrAlerts   = "https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/camsys%2Flirr-alerts.json"
+
+	// GPS positions of LIRR trains, from the TrainTime app's backend.
+	lirrLocations = "https://backend-unified.mylirr.org/locations?geometry=NONE&railroad=LIRR"
 )
 
 // minorAlerts are the alert types that don't say anything about whether
@@ -35,15 +38,22 @@ var minorAlerts = []string{"Station Notice", "Special Notice", "Boarding Change"
 // severeAlerts matches the alert types shown in red rather than amber.
 var severeAlerts = regexp.MustCompile(`Suspend|Cancel|Severe`)
 
+// positionInterval is how often the trains on the map are refreshed. Not
+// a divisor of a minute, so that the polls don't keep hitting the feeds at
+// the same point in their own update cycles.
+const positionInterval = 17 * time.Second
+
 type poller interface {
 	Poll(ctx context.Context, interval time.Duration)
 }
 
 type trains struct {
-	subway *subwaySign
-	lirr   *lirrSign
-	static []poller // refreshed daily
-	live   []poller // refreshed every minute
+	subway    *subwaySign
+	lirr      *lirrSign
+	trainMap  *trainMap
+	static    []poller // refreshed daily
+	live      []poller // refreshed every minute
+	positions []poller // refreshed every positionInterval, for the map
 }
 
 func newTrains(cacheDir string) (*trains, error) {
@@ -57,7 +67,7 @@ func newTrains(cacheDir string) (*trains, error) {
 	cached := func(name string) string { return filepath.Join(cacheDir, name) }
 	const forestHillsLIRR = "55"
 
-	subwayRoutes := transit.NewFile(staticSubway, cached("gtfs_subway.zip"), transit.FromZip(transit.LoadRoutes))
+	subwayStatic := transit.NewFile(staticSubway, cached("gtfs_subway.zip"), transit.FromZip(loadSubwayStatic([]string{"E", "F"})))
 	stations := transit.NewFile(subwayStations, cached("stations.csv"), transit.FromCSV(transit.LoadStations))
 	lirrStatic := transit.NewFile(staticLIRR, cached("gtfs_lirr.zip"), transit.FromZip(loadLIRRStatic(forestHillsLIRR, nyc)))
 	ace := transit.NewTripFeed(feedACE)
@@ -65,12 +75,14 @@ func newTrains(cacheDir string) (*trains, error) {
 	lirrTrips := transit.NewTripFeed(feedLIRR)
 	subwayAlertFeed := transit.NewAlertFeed(subwayAlerts)
 	lirrAlertFeed := transit.NewAlertFeed(lirrAlerts)
+	lirrTrains := transit.NewLocationFeed(lirrLocations)
 
 	south, west := uint32(1), uint32(1)
 
 	return &trains{
-		static: []poller{subwayRoutes, stations, lirrStatic},
-		live:   []poller{ace, bdfm, lirrTrips, subwayAlertFeed, lirrAlertFeed},
+		static:    []poller{subwayStatic, stations, lirrStatic},
+		live:      []poller{lirrTrips, subwayAlertFeed, lirrAlertFeed},
+		positions: []poller{ace, bdfm, lirrTrains},
 
 		// Manhattan-bound E and F from Forest Hills-71 Av. On Queens Blvd
 		// "S" is towards Manhattan, and "N" towards Jamaica.
@@ -96,10 +108,10 @@ func newTrains(cacheDir string) (*trains, error) {
 			},
 			alertBoroughs: []string{"M"},
 
-			trips:      []*transit.TripFeed{ace, bdfm},
-			alertFeed:  subwayAlertFeed,
-			routeNames: subwayRoutes,
-			stations:   stations,
+			trips:     []*transit.TripFeed{ace, bdfm},
+			alertFeed: subwayAlertFeed,
+			static:    subwayStatic,
+			stations:  stations,
 		},
 
 		// Westbound LIRR from Forest Hills, to Penn Station or Grand
@@ -119,6 +131,22 @@ func newTrains(cacheDir string) (*trains, error) {
 			alertFeed: lirrAlertFeed,
 			static:    lirrStatic,
 		},
+
+		// The same trains on their way to Forest Hills, from a bit west
+		// of it to a few stops beyond Jamaica. The frontend shows part
+		// of this area.
+		trainMap: &trainMap{
+			area:           transit.BBox{West: -73.880, South: 40.660, East: -73.735, North: 40.735},
+			subwayRoutes:   []string{"E", "F"},
+			subwayPlatform: "G08S",
+			lirrStation:    forestHillsLIRR,
+			lirrDirection:  "W",
+
+			subwayTrips:  []*transit.TripFeed{ace, bdfm},
+			subwayStatic: subwayStatic,
+			lirrTrains:   lirrTrains,
+			lirrStatic:   lirrStatic,
+		},
 	}, nil
 }
 
@@ -128,5 +156,8 @@ func (t *trains) poll(ctx context.Context) {
 	}
 	for _, p := range t.live {
 		go p.Poll(ctx, time.Minute)
+	}
+	for _, p := range t.positions {
+		go p.Poll(ctx, positionInterval)
 	}
 }

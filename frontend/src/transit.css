@@ -154,3 +154,126 @@
   text-decoration: line-through;
   text-decoration-color: var(--text-faint);
 }
+
+/* Map: the tracks around the station with the trains on their way, to the
+   right of the signs. A faint street map that fades out at the edges, with
+   the trains in their route colors. */
+.trainmap {
+  position: absolute;
+  left: 52vh;
+  right: 0;
+  bottom: 0;
+  height: 27vh;
+  background: var(--bg);
+  mask-image:
+    linear-gradient(to right, transparent, black 12%, black 88%, transparent),
+    linear-gradient(to bottom, transparent, black 30%, black 85%, transparent);
+  mask-composite: intersect;
+}
+
+.trainmap svg {
+  display: block;
+}
+
+.trainmap-water {
+  fill: #0f1418;
+}
+
+.trainmap-green {
+  fill: #101410;
+}
+
+.trainmap-road {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.trainmap-minor {
+  stroke: #18181a;
+  stroke-width: 1;
+}
+
+.trainmap-medium {
+  stroke: #1e1e21;
+  stroke-width: 1.6;
+}
+
+.trainmap-major {
+  stroke: #252528;
+  stroke-width: 2.4;
+}
+
+.trainmap-track {
+  fill: none;
+  stroke-linecap: round;
+}
+
+.trainmap-track.lirr {
+  stroke: #46443f;
+  stroke-width: 2;
+}
+
+.trainmap-track.subway {
+  stroke: #34332f;
+  stroke-width: 1.5;
+  stroke-dasharray: 4 3;
+}
+
+.trainmap-station circle {
+  r: 3.5px;
+  fill: var(--bg);
+  stroke: var(--text-muted);
+  stroke-width: 1.5;
+}
+
+.trainmap-station.subway circle {
+  r: 2px;
+  fill: #46443f;
+  stroke: none;
+}
+
+.trainmap-station.home circle {
+  r: 4.5px;
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+.trainmap-station.subway.home circle {
+  r: 3px;
+  fill: var(--accent);
+}
+
+.trainmap-station text {
+  font-size: 1.5vh;
+  fill: var(--text-faint);
+  transform: translate(0.7em, -0.5em);
+}
+
+.trainmap-station.home text {
+  fill: var(--text-muted);
+}
+
+.trainmap-train path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 4;
+  stroke-linecap: butt;
+}
+
+/* The front of the train. */
+.trainmap-train circle {
+  r: 3.5px;
+  fill: currentColor;
+  stroke: var(--bg);
+  stroke-width: 1;
+}
+
+.trainmap-credit {
+  position: absolute;
+  right: 12%;
+  bottom: 8%;
+  font-size: 0.9vh;
+  color: var(--text-faint);
+  opacity: 0.5;
+}

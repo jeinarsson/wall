@@ -76,3 +76,65 @@ func CanceledTrips(msg *gtfs.FeedMessage) map[string]bool {
 	}
 	return canceled
 }
+
+// LiveTrip is a trip in a realtime feed with its predicted stops.
+type LiveTrip struct {
+	TripID  string
+	RouteID string
+	// Stops are the stops still ahead, in order. Feeds also keep the last
+	// stop or two the trip has left for a while, with times in the past.
+	Stops []LiveStop
+	// Reported is when the train last reported its position, or zero if
+	// it hasn't. The NYC subway also lists trips that haven't started yet,
+	// with Reported in the future.
+	Reported time.Time
+	// StoppedAt is the stop where the train is standing, if any.
+	StoppedAt string
+}
+
+type LiveStop struct {
+	StopID string
+	Time   time.Time // departure, or arrival at the last stop
+}
+
+// LiveTrips lists the trips in msg that aren't canceled.
+func LiveTrips(msg *gtfs.FeedMessage) []LiveTrip {
+	var trips []LiveTrip
+	index := map[string]int{}
+	for _, e := range msg.Entity {
+		tu := e.TripUpdate
+		if tu == nil || tu.Trip == nil || tu.Trip.GetScheduleRelationship() == gtfs.TripDescriptor_CANCELED {
+			continue
+		}
+		t := LiveTrip{TripID: tu.Trip.GetTripId(), RouteID: tu.Trip.GetRouteId()}
+		for _, stu := range tu.StopTimeUpdate {
+			if stu.GetScheduleRelationship() == gtfs.TripUpdate_StopTimeUpdate_SKIPPED {
+				continue
+			}
+			ev := stu.Departure
+			if ev.GetTime() == 0 {
+				ev = stu.Arrival
+			}
+			if ev.GetTime() != 0 {
+				t.Stops = append(t.Stops, LiveStop{stu.GetStopId(), time.Unix(ev.GetTime(), 0)})
+			}
+		}
+		index[t.TripID] = len(trips)
+		trips = append(trips, t)
+	}
+	for _, e := range msg.Entity {
+		v := e.Vehicle
+		if v == nil || v.Trip == nil {
+			continue
+		}
+		i, ok := index[v.Trip.GetTripId()]
+		if !ok {
+			continue
+		}
+		trips[i].Reported = time.Unix(int64(v.GetTimestamp()), 0)
+		if v.GetCurrentStatus() == gtfs.VehiclePosition_STOPPED_AT {
+			trips[i].StoppedAt = v.GetStopId()
+		}
+	}
+	return trips
+}

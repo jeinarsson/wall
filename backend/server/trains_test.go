@@ -53,7 +53,7 @@ func TestLIRRBoard(t *testing.T) {
 	s := &lirrSign{directionID: west}
 	static := &lirrStatic{
 		routes: map[string]transit.Route{"1": {Color: "00985F"}},
-		stops:  map[string]string{"237": "Penn Station"},
+		stops:  map[string]transit.Stop{"237": {Name: "Penn Station"}},
 	}
 	trip := func(id, headsign string, dir uint32) transit.Trip {
 		return transit.Trip{ID: id, RouteID: "1", Headsign: headsign, ShortName: id, DirectionID: dir}

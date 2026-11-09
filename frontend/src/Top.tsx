@@ -5,8 +5,13 @@ import { getISOWeek } from 'date-fns/getISOWeek'
 import Contours from './Contours.tsx'
 import Lirr from './Lirr.tsx'
 import Subway from './Subway.tsx'
+import TrainMap, { View } from './TrainMap.tsx'
 
 import './clock.css';
+
+// Forest Hills on the left, Jamaica in the middle and the Atlantic Branch,
+// where most trains come from, on the right.
+const MAP_VIEW: View = { center: [-73.802, 40.7005], width: 11_500, rotate: 30 }
 
 // useMinute returns the current time, updated exactly on each minute boundary.
 function useMinute(): Date {
@@ -39,6 +44,7 @@ function Top() {
         <Subway title="Subway" src="/api/subway" count={3} maxAlerts={2} />
         <Lirr title="LIRR" src="/api/lirr" count={3} maxAlerts={2} />
       </div>
+      <TrainMap src="/api/trainmap" basemap="/basemap.json" view={MAP_VIEW} />
     </div>
   )
 }

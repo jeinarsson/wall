@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"strconv"
 )
 
 // Route is a row from a GTFS routes.txt.
@@ -30,14 +31,35 @@ func LoadRoutes(gtfs fs.FS) (map[string]Route, error) {
 	return routes, err
 }
 
-// LoadStops reads stop names from stops.txt in a static GTFS feed, by
-// stop id.
-func LoadStops(gtfs fs.FS) (map[string]string, error) {
-	stops := map[string]string{}
+// Stop is a row from a GTFS stops.txt.
+type Stop struct {
+	Name string
+	Code string // the LIRR's station code: "FHL"
+	LatLon
+}
+
+// LoadStops reads stops.txt from a static GTFS feed, by stop id.
+func LoadStops(gtfs fs.FS) (map[string]Stop, error) {
+	stops := map[string]Stop{}
 	err := readFile(gtfs, "stops.txt", func(row Row) {
-		stops[row("stop_id")] = row("stop_name")
+		lat, _ := strconv.ParseFloat(row("stop_lat"), 64)
+		lon, _ := strconv.ParseFloat(row("stop_lon"), 64)
+		stops[row("stop_id")] = Stop{Name: row("stop_name"), Code: row("stop_code"), LatLon: LatLon{lat, lon}}
 	})
 	return stops, err
+}
+
+// LoadServedStops returns the ids of the stops in a static GTFS feed where
+// passengers can get on or off, leaving out yards and other stops only for
+// staff.
+func LoadServedStops(gtfs fs.FS) (map[string]bool, error) {
+	served := map[string]bool{}
+	err := readFile(gtfs, "stop_times.txt", func(row Row) {
+		if row("pickup_type") != "1" || row("drop_off_type") != "1" {
+			served[row("stop_id")] = true
+		}
+	})
+	return served, err
 }
 
 // Station is a row from the MTA's subway Stations.csv, which adds

@@ -16,6 +16,27 @@ type Trip struct {
 	Headsign    string // "Penn Station"
 	ShortName   string // the LIRR train number
 	DirectionID uint32
+	ServiceID   string
+	ShapeID     string
+}
+
+// LoadTrips reads trips.txt from a static GTFS feed, by trip id.
+func LoadTrips(gtfs fs.FS) (map[string]Trip, error) {
+	trips := map[string]Trip{}
+	err := readFile(gtfs, "trips.txt", func(row Row) {
+		dir, _ := strconv.ParseUint(row("direction_id"), 10, 32)
+		id := row("trip_id")
+		trips[id] = Trip{
+			ID:          id,
+			RouteID:     row("route_id"),
+			Headsign:    row("trip_headsign"),
+			ShortName:   row("trip_short_name"),
+			DirectionID: uint32(dir),
+			ServiceID:   row("service_id"),
+			ShapeID:     row("shape_id"),
+		}
+	})
+	return trips, err
 }
 
 // ScheduledStop is a trip's scheduled departure from a stop.
@@ -85,26 +106,14 @@ func LoadTimetable(gtfs fs.FS, stopID string, loc *time.Location) (*Timetable, e
 		return nil, err
 	}
 
-	trips := map[string]Trip{}
-	services := map[string]string{}
-	err = readFile(gtfs, "trips.txt", func(row Row) {
-		dir, _ := strconv.ParseUint(row("direction_id"), 10, 32)
-		id := row("trip_id")
-		trips[id] = Trip{
-			ID:          id,
-			RouteID:     row("route_id"),
-			Headsign:    row("trip_headsign"),
-			ShortName:   row("trip_short_name"),
-			DirectionID: uint32(dir),
-		}
-		services[id] = row("service_id")
-	})
+	trips, err := LoadTrips(gtfs)
 	if err != nil {
 		return nil, err
 	}
 
 	for _, st := range stopTimes {
-		t.stops = append(t.stops, timetableStop{trips[st.trip], services[st.trip], st.offset})
+		trip := trips[st.trip]
+		t.stops = append(t.stops, timetableStop{trip, trip.ServiceID, st.offset})
 	}
 	return t, nil
 }

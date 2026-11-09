@@ -20,8 +20,9 @@ const maxAge = 10 * time.Minute
 
 // Live is a realtime feed that is refreshed in the background by Poll.
 type Live[T any] struct {
-	url   string
-	parse func([]byte) (T, error)
+	url    string
+	parse  func([]byte) (T, error)
+	header http.Header // added to requests
 
 	mu      sync.Mutex
 	data    T
@@ -72,6 +73,9 @@ func (f *Live[T]) fetch(ctx context.Context) error {
 	req, err := http.NewRequestWithContext(ctx, "GET", f.url, nil)
 	if err != nil {
 		return err
+	}
+	for k, v := range f.header {
+		req.Header[k] = v
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

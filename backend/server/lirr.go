@@ -26,11 +26,16 @@ type lirrSign struct {
 	static    *transit.File[*lirrStatic]
 }
 
-// lirrStatic is what the sign needs from the LIRR static GTFS feed.
+// lirrStatic is what the sign and the map need from the LIRR static GTFS
+// feed.
 type lirrStatic struct {
 	routes    map[string]transit.Route
-	stops     map[string]string
+	stops     map[string]transit.Stop
 	timetable *transit.Timetable
+	shapes    map[string]transit.Path
+	// trains has a trip for each train number, for its route and shape.
+	trains map[string]transit.Trip
+	served map[string]bool // stops where passengers get on or off
 }
 
 // loadLIRRStatic returns a loader for the static data of a sign at stop,
@@ -49,7 +54,23 @@ func loadLIRRStatic(stop string, loc *time.Location) func(fs.FS) (*lirrStatic, e
 		if err != nil {
 			return nil, err
 		}
-		return &lirrStatic{routes: routes, stops: stops, timetable: tt}, nil
+		shapes, err := transit.LoadShapes(gtfs, func(string) bool { return true })
+		if err != nil {
+			return nil, err
+		}
+		trips, err := transit.LoadTrips(gtfs)
+		if err != nil {
+			return nil, err
+		}
+		trains := map[string]transit.Trip{}
+		for _, t := range trips {
+			trains[t.ShortName] = t
+		}
+		served, err := transit.LoadServedStops(gtfs)
+		if err != nil {
+			return nil, err
+		}
+		return &lirrStatic{routes: routes, stops: stops, timetable: tt, shapes: shapes, trains: trains, served: served}, nil
 	}
 }
 
@@ -134,7 +155,7 @@ func (s *lirrSign) board(static *lirrStatic, scheduled []transit.ScheduledStop, 
 			continue
 		}
 		board.Departures = append(board.Departures, lirrDepartureJSON{
-			Destination: static.stops[st.LastStopID],
+			Destination: static.stops[st.LastStopID].Name,
 			Color:       routeColor(static.routes[st.RouteID]).Color,
 			Scheduled:   st.Scheduled(),
 			Expected:    &st.Time,

@@ -2,9 +2,11 @@ package main
 
 import (
 	"encoding/json"
+	"io/fs"
 	"net/http"
 	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/jeinarsson/wall/transit"
@@ -21,10 +23,41 @@ type subwaySign struct {
 	// Stations.csv: "M", "Bk", ...) to alerts.Stops.
 	alertBoroughs []string
 
-	trips      []*transit.TripFeed
-	alertFeed  *transit.AlertFeed
-	routeNames *transit.File[map[string]transit.Route]
-	stations   *transit.File[map[string]transit.Station]
+	trips     []*transit.TripFeed
+	alertFeed *transit.AlertFeed
+	static    *transit.File[*subwayStatic]
+	stations  *transit.File[map[string]transit.Station]
+}
+
+// subwayStatic is what the sign and the map need from the subway's static
+// GTFS feed.
+type subwayStatic struct {
+	routes map[string]transit.Route
+	stops  map[string]transit.Stop
+	shapes map[string]transit.Path // of the routes on the map
+}
+
+// loadSubwayStatic returns a loader for the static data, with the shapes
+// of routes. Subway shape ids start with the route: "E..S69R".
+func loadSubwayStatic(routes []string) func(fs.FS) (*subwayStatic, error) {
+	return func(gtfs fs.FS) (*subwayStatic, error) {
+		r, err := transit.LoadRoutes(gtfs)
+		if err != nil {
+			return nil, err
+		}
+		stops, err := transit.LoadStops(gtfs)
+		if err != nil {
+			return nil, err
+		}
+		shapes, err := transit.LoadShapes(gtfs, func(id string) bool {
+			route, _, _ := strings.Cut(id, ".")
+			return slices.Contains(routes, route)
+		})
+		if err != nil {
+			return nil, err
+		}
+		return &subwayStatic{routes: r, stops: stops, shapes: shapes}, nil
+	}
 }
 
 type subwayJSON struct {
@@ -59,7 +92,10 @@ func (s *subwaySign) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			stopTimes = append(stopTimes, transit.StopTimes(msg, s.platform)...)
 		}
 	}
-	routes, _ := s.routeNames.Get()
+	var routes map[string]transit.Route
+	if static, ok := s.static.Get(); ok {
+		routes = static.routes
+	}
 	alerts, _ := s.alertFeed.Get(now)
 	filter := s.alerts
 	if stations, ok := s.stations.Get(); ok {
