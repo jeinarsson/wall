@@ -116,10 +116,14 @@ MTA data quirks worth knowing:
 - The subway vehicle status is always `STOPPED_AT`, meaning "at or last
   passed" that stop; its timestamp is the latest report, not the arrival.
   The report in which the stop changes is the arrival, and arrivals are the
-  only reliable events (seen 5-18 s after they happen). Predictions are
-  revised by up to a minute at every update. A stop drops off the trip
-  about 30 s after a report, which says nothing about departure. The ACE
-  feed is updated every 6-9 s, BDFM every ~15 s.
+  only reliable events (seen 5-18 s after they happen). While a train
+  stands at a stop it is reported every few seconds (each report shows up
+  10-25 s late); once it moves the reports stop until the next stop, so
+  the last report is about the departure. The stop drops off the trip
+  30-45 s after it. Between Forest Hills and Roosevelt Av the E and F run
+  express, 4-6 min without reports. Predictions are revised by up to a
+  minute at every update. The ACE feed is updated every 6-9 s, BDFM every
+  ~15 s.
 - LIRR GTFS-RT vehicle positions are snapped to stations and often stale.
   Real GPS (fixes every 2-6 s, with speed, heading and cars) comes from the
   TrainTime app's backend, `backend-unified.mylirr.org` with header
@@ -129,8 +133,8 @@ MTA data quirks worth knowing:
 
 ## Train map
 
-The map shows the trains that the signs list, while they are on their way
-through the area around the station.
+The map shows the trains that stop at the station in the signs' direction
+while they are in the area around it, before and after they stop.
 
 - **View and data**: `trainMap.view` in `server/trains.go` is the part of
   the map shown (center, width and height in meters, rotation); it also
@@ -141,13 +145,19 @@ through the area around the station.
   fetch takes a minute). `/api/map` has all of this and changes daily;
   `/api/map/trains` has the trains, and is polled every 5 s.
 - **LIRR** trains are where their GPS says, then go on at their speed until
-  their next stop, for at most 20 s (`transit.DeadReckon`). The list of
-  trains is fetched every minute, and the trains on (or nearing) the map
-  one by one every 7 s. Over 17 s this is off by 12 m median, 66 m p90.
-- **Subway** trains stand at the stop they last arrived at, run to the next
-  at an average speed, and wait there until the feed says they got there
-  (`transit.SubwayModel`, with `transit.Arrivals` remembering arrivals).
-  They never move backwards, and are at most a stop ahead of the data.
+  their next stop, for at most 20 s (`transit.DeadReckon`); fixes older
+  than 3 min aren't shown. The list of trains is fetched every minute, and
+  the trains on (or nearing) the map one by one every 7 s, until they have
+  left the station and the map. Over 17 s this is off by 12 m median,
+  66 m p90.
+- **Subway** trains stand at the stop they are reported at until they no
+  longer are (`transit.SubwayTracker`: the stop drops off the trip, or the
+  reports are a minute stale), then run to their next stop in the time
+  predicted as they left (at 5-20 m/s), and wait there until the feed says
+  they got there (`transit.SubwayModel`). They never move backwards and are
+  at most a stop ahead of the data, but jump ahead by up to a kilometer
+  when a departure or arrival is noticed late. Trains the feed loses track
+  of are dropped 5 min later.
 - Each train comes with a path and knots (time, meters along the path);
   the frontend moves it along them at 10 fps, the same way as
   `transit.PositionAt`, and glides to where new data puts it.

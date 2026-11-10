@@ -14,31 +14,34 @@ import (
 	"github.com/jeinarsson/wall/transit"
 )
 
-// trainMap is a map of the tracks around the station, with the trains on
-// their way to it. It serves the map (/api/map), which changes daily, and
-// the trains on it (/api/map/trains).
+// trainMap is a map of the tracks around the station, with the trains
+// that stop there on their way through the area, before and after they
+// stop. It serves the map (/api/map), which changes daily, and the trains
+// on it (/api/map/trains).
 //
 // The LIRR trains are where their GPS says, and go on at their speed until
 // the next fix. Subway trains have no GPS (they're underground); they are
-// placed from their arrivals at stops (see transit.SubwayModel).
+// placed from their reports at stops (see transit.SubwayModel).
 type trainMap struct {
 	view mapView
 	area transit.BBox // trains and tracks shown; somewhat more than view
-	// Subway trains on routes that will still leave from platform.
+	// Subway trains on routes that stop at platform, in its direction.
 	subwayRoutes   []string
 	subwayPlatform string // "G08S"
 	subwayModel    transit.SubwayModel
-	// LIRR trains in direction that will still stop at lirrStation, going
-	// on from their last GPS fix for at most lirrAhead.
+	// LIRR trains in direction that stop at lirrStation, going on from
+	// their last GPS fix for at most lirrAhead. Fixes older than lirrLost
+	// are not shown.
 	lirrStation   string // GTFS stop id: "55"
 	lirrDirection string // "E" or "W"
 	lirrAhead     time.Duration
+	lirrLost      time.Duration
 
 	subwayTrips  []*transit.TripFeed
 	subwayStatic *transit.File[*subwayStatic]
-	// arrivals is updated on every request for the trains, which the
+	// tracker is updated on every request for the trains, which the
 	// frontend makes more often than the feeds are refreshed.
-	arrivals   transit.Arrivals
+	tracker    transit.SubwayTracker
 	lirrTrains *lirrPositions
 	lirrStatic *transit.File[*lirrStatic]
 	basemap    *transit.File[*basemap.Layers]
@@ -82,6 +85,10 @@ const (
 // nearTrack is how close to a track a stop or GPS fix must be to be on it,
 // in meters.
 const nearTrack = 60
+
+// nearStop is how far past a stop a GPS fix may be and still be at it, in
+// meters.
+const nearStop = 30
 
 type mapJSON struct {
 	View     viewJSON
@@ -208,6 +215,9 @@ func (m *trainMap) ServeTrains(w http.ResponseWriter, r *http.Request) {
 	out := trainsJSON{Trains: []mapTrainJSON{}}
 	if static, ok := m.lirrStatic.Get(); ok {
 		for _, t := range m.lirrTrains.Get(now) {
+			if now.Sub(t.Time) > m.lirrLost {
+				continue
+			}
 			if tr, ok := m.lirrTrain(static, t); ok {
 				out.Trains = append(out.Trains, tr)
 			}
@@ -217,10 +227,11 @@ func (m *trainMap) ServeTrains(w http.ResponseWriter, r *http.Request) {
 		var trips []transit.LiveTrip
 		for _, f := range m.subwayTrips {
 			if msg, ok := f.Get(now); ok {
-				trips = append(trips, transit.LiveTrips(msg)...)
+				live := transit.LiveTrips(msg)
+				m.tracker.Update(live, time.Unix(int64(msg.GetHeader().GetTimestamp()), 0))
+				trips = append(trips, live...)
 			}
 		}
-		m.arrivals.Update(trips, now)
 		for _, t := range trips {
 			if tr, ok := m.subwayTrain(static, t, now); ok {
 				out.Trains = append(out.Trains, tr)
@@ -231,25 +242,34 @@ func (m *trainMap) ServeTrains(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(out)
 }
 
-// wantsLIRR reports whether t is a train for the map: in the right
-// direction and still to stop at the station.
-func (m *trainMap) wantsLIRR(static *lirrStatic, t transit.TrainLocation) bool {
+// lirrStop returns how t stops at the station: whether it is a train for
+// the map, in the right direction and stopping there, and whether it has
+// left.
+func (m *trainMap) lirrStop(static *lirrStatic, t transit.TrainLocation) (wanted, departed bool) {
 	if t.Canceled || t.Direction != m.lirrDirection {
-		return false
+		return false, false
 	}
 	home := static.stops[m.lirrStation].Code
 	for _, s := range t.Stops {
 		if s.Code == home {
-			return !s.Departed && !s.Canceled
+			return !s.Canceled, s.Departed
 		}
 	}
-	return false
+	return false, false
+}
+
+// watchLIRR reports whether t is worth following closely: a train for the
+// map in near, the area from which it gets to the map in a few minutes,
+// unless it has left the station and the map.
+func (m *trainMap) watchLIRR(static *lirrStatic, near transit.BBox, t transit.TrainLocation) bool {
+	wanted, departed := m.lirrStop(static, t)
+	return wanted && near.Contains(t.LatLon) && !(departed && !m.area.Contains(t.LatLon))
 }
 
 // lirrTrain places an LIRR train on its shape (or else the nearest track)
 // and plans its way from its GPS fix to its next stop.
 func (m *trainMap) lirrTrain(static *lirrStatic, t transit.TrainLocation) (mapTrainJSON, bool) {
-	if !m.area.Contains(t.LatLon) || !m.wantsLIRR(static, t) {
+	if wanted, _ := m.lirrStop(static, t); !wanted || !m.area.Contains(t.LatLon) {
 		return mapTrainJSON{}, false
 	}
 	// The train's own shape, so that it follows the right branch; or else
@@ -275,9 +295,11 @@ func (m *trainMap) lirrTrain(static *lirrStatic, t transit.TrainLocation) (mapTr
 	for id := range static.stations[shapeID] {
 		codes[static.stops[id].Code] = id
 	}
+	// The next stop, unless the train is past it already. A train at a
+	// stop may be a few meters past it by its GPS; it is there.
 	for _, s := range t.Stops {
-		if a, ok := static.stations[shapeID][codes[s.Code]]; ok && !s.Departed && !s.Canceled && a >= along {
-			until = a - start
+		if a, ok := static.stations[shapeID][codes[s.Code]]; ok && !s.Departed && !s.Canceled && a >= along-nearStop {
+			until = min(a-start, until)
 			break
 		}
 	}
@@ -312,11 +334,14 @@ func heading(p transit.Path, along, heading float64) bool {
 }
 
 // subwayTrain places a subway train on its shape, if it is one for the
-// map: on the right route, under way, and still to leave from the
-// platform. A train at the platform stands there until it leaves.
+// map: on the right route and in the platform's direction, on a path
+// through its station, and under way (see transit.SubwayTracker).
 func (m *trainMap) subwayTrain(static *subwayStatic, t transit.LiveTrip, now time.Time) (mapTrainJSON, bool) {
-	started := !t.Reported.IsZero() && !t.Reported.After(now)
-	if !slices.Contains(m.subwayRoutes, t.RouteID) || !started || !leavesFrom(t, m.subwayPlatform, now) {
+	if !slices.Contains(m.subwayRoutes, t.RouteID) {
+		return mapTrainJSON{}, false
+	}
+	v, ok := m.tracker.Get(t.TripID)
+	if !ok || !sameDirection(v.StopID, m.subwayPlatform) {
 		return mapTrainJSON{}, false
 	}
 	shapeID, ok := tripShape(static, t)
@@ -324,25 +349,14 @@ func (m *trainMap) subwayTrain(static *subwayStatic, t transit.LiveTrip, now tim
 		return mapTrainJSON{}, false
 	}
 	path, stations := static.shapes[shapeID], static.stations[shapeID]
+	if _, ok := stations[station(m.subwayPlatform)]; !ok {
+		return mapTrainJSON{}, false
+	}
 	along := func(stopID string) (float64, bool) {
 		a, ok := stations[station(stopID)]
 		return a, ok
 	}
-	all := make([]float64, 0, len(stations))
-	for _, a := range stations {
-		all = append(all, a)
-	}
-	sort.Float64s(all)
-
-	var last *transit.Arrival
-	if a, ok := m.arrivals.Get(t.TripID); ok {
-		last = &a
-	}
-	knots := m.subwayModel.Knots(t, last, along, all, now)
-	if a, ok := along(m.subwayPlatform); ok && t.StoppedAt == m.subwayPlatform {
-		// At the station, until the feed says it has left.
-		knots = []transit.Knot{{Time: now, Along: a}}
-	}
+	knots := m.subwayModel.Knots(v, along, now)
 	pos, ok := transit.PositionAt(knots, true, now)
 	if !ok || !m.area.Contains(path.At(pos)) {
 		return mapTrainJSON{}, false
@@ -399,14 +413,10 @@ func station(platform string) string {
 	return platform
 }
 
-// leavesFrom reports whether t is still to leave stop.
-func leavesFrom(t transit.LiveTrip, stop string, now time.Time) bool {
-	for _, s := range t.Stops {
-		if s.StopID == stop && !subwayLeft(s.Time, now) {
-			return true
-		}
-	}
-	return false
+// sameDirection reports whether two subway platforms are in the same
+// direction: "G08S" and "G14S".
+func sameDirection(a, b string) bool {
+	return a != "" && b != "" && a[len(a)-1] == b[len(b)-1]
 }
 
 func sortedShapes(shapes map[string]transit.Path) []transit.Path {

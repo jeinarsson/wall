@@ -149,25 +149,26 @@ func newTrains(cacheDir string) (*trains, error) {
 		area:           mapArea,
 		subwayRoutes:   []string{"E", "F"},
 		subwayPlatform: "G08S",
-		subwayModel:    transit.SubwayModel{Dwell: 20 * time.Second, Speed: 10},
+		subwayModel:    transit.SubwayModel{MinSpeed: 5, MaxSpeed: 20, Lost: 5 * time.Minute},
 		lirrStation:    forestHillsLIRR,
 		lirrDirection:  "W",
 		lirrAhead:      20 * time.Second,
+		lirrLost:       3 * time.Minute,
 
 		subwayTrips:  []*transit.TripFeed{ace, bdfm},
 		subwayStatic: subwayStatic,
 		lirrStatic:   lirrStatic,
 		basemap:      streets,
 	}
-	// Follow the LIRR trains for the map, and those that will be on it
-	// in a few minutes.
+	// Follow the LIRR trains on the map, and those that will be on it in
+	// a few minutes, until they have left the station and the map.
 	watchArea := view.bounds(5000)
 	lirrTrains := &lirrPositions{
 		list: lirrList,
 		url:  func(id string) string { return fmt.Sprintf(lirrLocation, url.PathEscape(id)) },
 		watch: func(t transit.TrainLocation) bool {
 			static, ok := lirrStatic.Get()
-			return ok && watchArea.Contains(t.LatLon) && tm.wantsLIRR(static, t)
+			return ok && tm.watchLIRR(static, watchArea, t)
 		},
 	}
 	tm.lirrTrains = lirrTrains

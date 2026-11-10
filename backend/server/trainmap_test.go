@@ -50,3 +50,37 @@ func TestTripShape(t *testing.T) {
 		t.Errorf("found a shape for another route")
 	}
 }
+
+func TestWatchLIRR(t *testing.T) {
+	m := &trainMap{
+		area:          transit.BBox{West: 0, South: 0, East: 1, North: 1},
+		lirrStation:   "55",
+		lirrDirection: "W",
+	}
+	static := &lirrStatic{stops: map[string]transit.Stop{"55": {Code: "FHL"}}}
+	near := transit.BBox{West: -1, South: -1, East: 2, North: 2}
+	train := func(dir string, lon float64, stops ...transit.TrainLocationStop) transit.TrainLocation {
+		return transit.TrainLocation{Direction: dir, LatLon: transit.LatLon{Lat: 0.5, Lon: lon}, Stops: stops}
+	}
+	fhl := transit.TrainLocationStop{Code: "FHL"}
+	left := transit.TrainLocationStop{Code: "FHL", Departed: true}
+	skips := transit.TrainLocationStop{Code: "FHL", Canceled: true}
+	for _, tc := range []struct {
+		name string
+		t    transit.TrainLocation
+		want bool
+	}{
+		{"on its way, on the map", train("W", 0.5, fhl), true},
+		{"on its way, nearing the map", train("W", 1.5, fhl), true},
+		{"far away", train("W", 3, fhl), false},
+		{"left the station, still on the map", train("W", 0.5, left), true},
+		{"left the station and the map", train("W", -0.5, left), false},
+		{"the other way", train("E", 0.5, fhl), false},
+		{"not stopping", train("W", 0.5, transit.TrainLocationStop{Code: "KGN"}), false},
+		{"stop canceled", train("W", 0.5, skips), false},
+	} {
+		if got := m.watchLIRR(static, near, tc.t); got != tc.want {
+			t.Errorf("%s: got %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
