@@ -120,8 +120,9 @@ func (s *subwaySign) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(s.board(stopTimes, routes, alerts, filter, now))
 }
 
-// board lists the upcoming trains on s.routes in stopTimes and the alerts
-// that match filter.
+// board lists the trains on s.routes in stopTimes that haven't left, and
+// the alerts that match filter. Trains at the platform have times in the
+// past.
 func (s *subwaySign) board(stopTimes []transit.StopTime, routes map[string]transit.Route, alerts []transit.Alert, filter transit.AlertFilter, now time.Time) subwayJSON {
 	board := subwayJSON{Routes: []subwayRouteJSON{}, Alerts: []alertJSON{}, Colors: map[string]colorJSON{}}
 	for id, r := range routes {
@@ -130,15 +131,30 @@ func (s *subwaySign) board(stopTimes []transit.StopTime, routes map[string]trans
 	for _, id := range s.routes {
 		row := subwayRouteJSON{Route: id, colorJSON: routeColor(routes[id]), Times: []time.Time{}}
 		for _, st := range stopTimes {
-			if st.RouteID == id && !st.Canceled && st.Time.After(now) {
+			if st.RouteID == id && !st.Canceled && !subwayLeft(st.Time, now) {
 				row.Times = append(row.Times, st.Time)
 			}
 		}
+		// The feed sometimes lists a train twice, as two trips.
 		slices.SortFunc(row.Times, time.Time.Compare)
+		row.Times = slices.CompactFunc(row.Times, time.Time.Equal)
 		board.Routes = append(board.Routes, row)
 	}
 	board.Alerts = matchingAlerts(alerts, filter, now)
 	return board
+}
+
+// subwayHeld is how long a train can stand at a platform, past the time
+// in the feed, and still be there.
+const subwayHeld = 2 * time.Minute
+
+// subwayLeft reports whether a train that the feed still lists at a
+// platform at t has left. While a train stands at a platform, the time
+// there is that of its latest report, a few seconds ago; the stop drops
+// off the trip some 30-45 s after the last report, about when the train
+// leaves. Times long past are trips the feed has lost track of.
+func subwayLeft(t, now time.Time) bool {
+	return t.Before(now.Add(-subwayHeld))
 }
 
 // stationsIn returns the ids of the stations in any of boroughs.

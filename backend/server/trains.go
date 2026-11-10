@@ -37,6 +37,9 @@ const (
 	// of them, and one.
 	lirrLocations = "https://backend-unified.mylirr.org/locations?geometry=NONE&railroad=LIRR"
 	lirrLocation  = "https://backend-unified.mylirr.org/locations/%s?geometry=NONE"
+	// The trains due at a station, as on its board in the app, by the
+	// station's GTFS stop_code.
+	lirrArrivals = "https://backend-unified.mylirr.org/arrivals/%s"
 
 	// Streets, parks and water for the map, from OpenStreetMap: the main
 	// Overpass API instance, then a mirror. Others are listed at
@@ -51,6 +54,10 @@ var minorAlerts = []string{"Station Notice", "Special Notice", "Boarding Change"
 
 // severeAlerts matches the alert types shown in red rather than amber.
 var severeAlerts = regexp.MustCompile(`Suspend|Cancel|Severe`)
+
+// How often the trains on the LIRR sign are refreshed. The TrainTime
+// board lags the trains by 15-45 s.
+const boardInterval = 13 * time.Second
 
 // How often the trains on the map are refreshed: the subway feeds, which
 // are updated every 7-15 s, and the GPS fixes of the LIRR trains on the
@@ -75,6 +82,7 @@ type trains struct {
 	live      []poller // refreshed every minute
 	positions []poller // refreshed every positionInterval, for the map
 	gps       []poller // refreshed every gpsInterval, for the map
+	boards    []poller // refreshed every boardInterval, for the signs
 }
 
 func newTrains(cacheDir string) (*trains, error) {
@@ -86,7 +94,7 @@ func newTrains(cacheDir string) (*trains, error) {
 		return nil, err
 	}
 	cached := func(name string) string { return filepath.Join(cacheDir, name) }
-	const forestHillsLIRR = "55"
+	const forestHillsLIRR, forestHillsCode = "55", "FHL"
 
 	subwayStatic := transit.NewFile(staticSubway, cached("gtfs_subway.zip"), transit.FromZip(loadSubwayStatic([]string{"E", "F"})))
 	stations := transit.NewFile(subwayStations, cached("stations.csv"), transit.FromFile(transit.LoadStations))
@@ -97,6 +105,7 @@ func newTrains(cacheDir string) (*trains, error) {
 	subwayAlertFeed := transit.NewAlertFeed(subwayAlerts)
 	lirrAlertFeed := transit.NewAlertFeed(lirrAlerts)
 	lirrList := transit.NewLocationFeed(lirrLocations)
+	lirrBoard := transit.NewArrivalFeed(fmt.Sprintf(lirrArrivals, forestHillsCode))
 
 	// The map shows Forest Hills a third from the left and about halfway
 	// up, and the tracks from Jamaica to Locust Manor on the Atlantic
@@ -169,6 +178,7 @@ func newTrains(cacheDir string) (*trains, error) {
 		live:      []poller{lirrTrips, subwayAlertFeed, lirrAlertFeed, lirrList},
 		positions: []poller{ace, bdfm},
 		gps:       []poller{lirrTrains},
+		boards:    []poller{lirrBoard},
 
 		// Manhattan-bound E and F from Forest Hills-71 Av. On Queens Blvd
 		// "S" is towards Manhattan, and "N" towards Jamaica.
@@ -204,6 +214,7 @@ func newTrains(cacheDir string) (*trains, error) {
 		// Central.
 		lirr: &lirrSign{
 			stop:        forestHillsLIRR,
+			direction:   "W",
 			directionID: west,
 			ahead:       6 * time.Hour,
 			alerts: transit.AlertFilter{
@@ -213,6 +224,7 @@ func newTrains(cacheDir string) (*trains, error) {
 			},
 			cancelAlertType: "Cancellations",
 
+			arrivals:  lirrBoard,
 			trips:     lirrTrips,
 			alertFeed: lirrAlertFeed,
 			static:    lirrStatic,
@@ -237,5 +249,8 @@ func (t *trains) poll(ctx context.Context) {
 	}
 	for _, p := range t.gps {
 		go p.Poll(ctx, gpsInterval)
+	}
+	for _, p := range t.boards {
+		go p.Poll(ctx, boardInterval)
 	}
 }

@@ -4,12 +4,9 @@ import './transit.css';
 
 // Shared components of the train signs.
 
+// Minutes is a countdown, which stays at 0 for trains that are late.
 export function Minutes({ minutes }: { minutes: number }) {
-  return (
-    <span className="transit-minutes">
-      {minutes < 1 ? 'now' : minutes}
-    </span>
-  )
+  return <span className="transit-minutes">{Math.max(0, minutes)}</span>
 }
 
 export function Heading({ title }: { title: string }) {

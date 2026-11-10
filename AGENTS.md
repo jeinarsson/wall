@@ -18,7 +18,7 @@ backend/            Go workspace (go.work)
     server.go       flags, routes, calendars, /api/calendarEvents
     trains.go       everything specific to where the wall hangs: feeds, stops, filters
     subway.go       subwaySign: countdown per route + filtered alerts -> /api/subway
-    lirr.go         lirrSign: timetable merged with live data -> /api/lirr
+    lirr.go         lirrSign: the TrainTime board (or timetable) -> /api/lirr
     trainmap.go     trainMap: map, tracks, stations -> /api/map; trains -> /api/map/trains
     lirrpositions.go  polls the GPS of the few LIRR trains on the map
   gcal/             thin Google Calendar client (service account)
@@ -72,7 +72,9 @@ Data comes from the MTA's public feeds; no API key is needed.
   on the kiosk's wifi; signs stay empty until it's done.
 - **Realtime trips and alerts** are polled every minute by `transit.Live`
   and dropped if older than 10 minutes. The frontend polls the server every
-  30 s and computes countdowns itself.
+  10 s and computes countdowns itself, which stay at 0 while a train is
+  late. Trains stay on the signs until they leave; the backend decides
+  when that is, the frontend doesn't drop them by their times.
 
 Design rule: keep the core dumb and explicit, and convenience on the
 outside. `transit` knows nothing about Forest Hills; its functions take
@@ -91,13 +93,22 @@ MTA data quirks worth knowing:
 - Subway alerts name stations without N/S and use `direction_id` 1 for
   south. Live incidents ("Delays") often have no stops or direction, only
   text, hence the text rules in `AlertFilter`.
-- The LIRR feed drops canceled trains instead of marking them, so the LIRR
-  sign is built from the static timetable (`stop_times.txt`), with live
-  predictions and "Cancellations" alerts (which name trip ids) on top. LIRR
+- The LIRR sign shows the station's board in the TrainTime app
+  (`/arrivals/FHL`, see below; polled every 13 s): scheduled times, `otp`
+  (seconds early, so negative when late), `stop_status` (`EN_ROUTE`,
+  `ARRIVING`, `BERTHED`), held and canceled. It lists trains until they
+  leave, 15-45 s late, and never says `DEPARTED`.
+- Without the board, the LIRR sign falls back to the static timetable
+  (`stop_times.txt`), with GTFS-RT predictions and "Cancellations" alerts
+  (which name trip ids) on top, as the GTFS-RT feed drops canceled trains
+  instead of marking them. Its predictions lag by a minute or more. LIRR
   `direction_id` 1 is westbound. GTFS times can exceed 24:00 and belong to
   the previous service date.
 - Feeds keep trips for a while after they leave; always filter out past
   times.
+- While a subway train stands at a platform, the feed lists that stop with
+  the time of the train's latest report, a few seconds in the past. The
+  stop drops off 30-45 s after the last report, about when it leaves.
 - Subway trips are listed before they start, with vehicle timestamps in
   the future; a trip is under way once its timestamp has passed. Most trip
   ids end with their shape (`089900_E..S69R`), but some only with route and

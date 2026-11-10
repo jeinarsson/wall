@@ -18,8 +18,11 @@ type lirrPositions struct {
 	url   func(trainID string) string
 	watch func(transit.TrainLocation) bool
 
-	mu      sync.Mutex
-	watched map[string]*transit.TrainLocationFeed // by train id
+	mu sync.Mutex
+	// feeds has the trains in the list that have been watched, by train
+	// id. Those no longer watched keep their last fix, which is newer than
+	// the list's for a while: that they have left the station, say.
+	feeds map[string]*transit.TrainLocationFeed
 }
 
 // Poll refreshes the watched trains every interval until ctx is done.
@@ -37,25 +40,26 @@ func (p *lirrPositions) Poll(ctx context.Context, interval time.Duration) {
 func (p *lirrPositions) refresh(ctx context.Context) {
 	trains, _ := p.list.Get(time.Now())
 	p.mu.Lock()
-	if p.watched == nil {
-		p.watched = map[string]*transit.TrainLocationFeed{}
-	}
 	// Judge the trains by where they were last seen.
+	feeds := map[string]*transit.TrainLocationFeed{}
 	watched := map[string]*transit.TrainLocationFeed{}
 	for _, t := range trains {
-		f, ok := p.watched[t.TrainID]
+		f, ok := p.feeds[t.TrainID]
 		if ok {
+			feeds[t.TrainID] = f
 			if w, ok := f.Get(time.Now()); ok && w.Time.After(t.Time) {
 				t = w
 			}
-		} else {
-			f = transit.NewTrainLocationFeed(p.url(t.TrainID))
 		}
 		if p.watch(t) {
+			if f == nil {
+				f = transit.NewTrainLocationFeed(p.url(t.TrainID))
+				feeds[t.TrainID] = f
+			}
 			watched[t.TrainID] = f
 		}
 	}
-	p.watched = watched
+	p.feeds = feeds
 	p.mu.Unlock()
 
 	for id, f := range watched {
@@ -74,7 +78,7 @@ func (p *lirrPositions) Get(now time.Time) []transit.TrainLocation {
 	defer p.mu.Unlock()
 	for i, t := range trains {
 		out[i] = t
-		if f, ok := p.watched[t.TrainID]; ok {
+		if f, ok := p.feeds[t.TrainID]; ok {
 			if w, ok := f.Get(now); ok && w.Time.After(t.Time) {
 				out[i] = w
 			}

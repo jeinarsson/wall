@@ -313,7 +313,7 @@ func heading(p transit.Path, along, heading float64) bool {
 
 // subwayTrain places a subway train on its shape, if it is one for the
 // map: on the right route, under way, and still to leave from the
-// platform.
+// platform. A train at the platform stands there until it leaves.
 func (m *trainMap) subwayTrain(static *subwayStatic, t transit.LiveTrip, now time.Time) (mapTrainJSON, bool) {
 	started := !t.Reported.IsZero() && !t.Reported.After(now)
 	if !slices.Contains(m.subwayRoutes, t.RouteID) || !started || !leavesFrom(t, m.subwayPlatform, now) {
@@ -339,6 +339,10 @@ func (m *trainMap) subwayTrain(static *subwayStatic, t transit.LiveTrip, now tim
 		last = &a
 	}
 	knots := m.subwayModel.Knots(t, last, along, all, now)
+	if a, ok := along(m.subwayPlatform); ok && t.StoppedAt == m.subwayPlatform {
+		// At the station, until the feed says it has left.
+		knots = []transit.Knot{{Time: now, Along: a}}
+	}
 	pos, ok := transit.PositionAt(knots, true, now)
 	if !ok || !m.area.Contains(path.At(pos)) {
 		return mapTrainJSON{}, false
@@ -398,7 +402,7 @@ func station(platform string) string {
 // leavesFrom reports whether t is still to leave stop.
 func leavesFrom(t transit.LiveTrip, stop string, now time.Time) bool {
 	for _, s := range t.Stops {
-		if s.StopID == stop && s.Time.After(now) {
+		if s.StopID == stop && !subwayLeft(s.Time, now) {
 			return true
 		}
 	}

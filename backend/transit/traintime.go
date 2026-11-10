@@ -122,3 +122,73 @@ func parseLocations(b []byte) ([]TrainLocation, error) {
 	}
 	return out, nil
 }
+
+// TrainArrival is a train on a station's board in the TrainTime app: the
+// trains due at the station in the next hours, until they leave. This is
+// what the app shows for the station.
+type TrainArrival struct {
+	TrainID   string
+	TrainNum  string    // the GTFS trip_short_name
+	Direction string    // "E" or "W"
+	Scheduled time.Time // at the station
+	// Late is how late the train is, as of the last stop it passed, if
+	// it has started. Early trains are late by a negative amount.
+	Late *time.Duration
+	// Status is "EN_ROUTE", "ARRIVING" or "BERTHED" (at the platform).
+	Status   string
+	Held     bool
+	Canceled bool
+	Track    string
+	Stops    []string // codes of the stops after this one: "NYK"
+}
+
+// ArrivalFeed is the board of one station.
+type ArrivalFeed = Live[[]TrainArrival]
+
+// NewArrivalFeed returns a feed of the board at url, such as
+// https://backend-unified.mylirr.org/arrivals/FHL
+func NewArrivalFeed(url string) *ArrivalFeed {
+	return &ArrivalFeed{url: url, parse: parseArrivals, header: trainTimeHeader}
+}
+
+func parseArrivals(b []byte) ([]TrainArrival, error) {
+	var board struct {
+		Arrivals []struct {
+			TrainID    string `json:"train_id"`
+			TrainNum   string `json:"train_num"`
+			Direction  string
+			Time       int64
+			StopStatus string `json:"stop_status"`
+			Track      string
+			Stops      []string
+			Status     struct {
+				OTP      *int64 // seconds early
+				Held     bool
+				Canceled bool
+			}
+		}
+	}
+	if err := json.Unmarshal(b, &board); err != nil {
+		return nil, err
+	}
+	out := []TrainArrival{}
+	for _, a := range board.Arrivals {
+		t := TrainArrival{
+			TrainID:   a.TrainID,
+			TrainNum:  a.TrainNum,
+			Direction: a.Direction,
+			Scheduled: time.Unix(a.Time, 0),
+			Status:    a.StopStatus,
+			Held:      a.Status.Held,
+			Canceled:  a.Status.Canceled,
+			Track:     a.Track,
+			Stops:     a.Stops,
+		}
+		if a.Status.OTP != nil {
+			late := -time.Duration(*a.Status.OTP) * time.Second
+			t.Late = &late
+		}
+		out = append(out, t)
+	}
+	return out, nil
+}

@@ -103,10 +103,15 @@
   color: var(--text-faint);
 }
 
-/* LIRR: a timetable with the branch color, scheduled (and expected) time,
-   destination and minutes. */
+/* LIRR: a timetable with the branch color, scheduled time, destination,
+   minutes and a note on lateness or status. The note comes last, so that
+   nothing moves when it changes. */
 .lirr-rows {
-  grid-template-columns: auto auto auto auto auto;
+  grid-template-columns: repeat(6, auto);
+}
+
+.lirr-rows .transit-minutes {
+  min-width: 1.2em;
 }
 
 .lirr-rows .transit-unit {
@@ -127,25 +132,25 @@
   font-variant-numeric: tabular-nums;
 }
 
-.lirr-expected {
-  margin-left: 0.5em;
-}
-
-.lirr-expected.late {
-  color: #e39a3b;
-}
-
-.lirr-expected.very-late {
-  color: #d9584a;
-}
-
 .lirr-destination {
   color: var(--text-faint);
 }
 
-.lirr-canceled {
-  grid-column: span 2;
+.lirr-note {
+  white-space: nowrap;
   font-size: 0.8em;
+}
+
+.lirr-note.here {
+  color: var(--text);
+}
+
+.lirr-note.late {
+  color: #e39a3b;
+}
+
+.lirr-note.very-late,
+.lirr-note.canceled {
   color: #d9584a;
 }
 

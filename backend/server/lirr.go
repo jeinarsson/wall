@@ -5,25 +5,40 @@ import (
 	"io/fs"
 	"net/http"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/jeinarsson/wall/transit"
 )
 
 // lirrSign is a timetable for one LIRR station and direction: the
-// scheduled trains with their expected times, cancellations, and service
-// alerts for the station.
+// scheduled trains with how late they are, cancellations, whether they are
+// at the station, and service alerts for the station.
+//
+// The trains come from the station's board in the TrainTime app, which
+// lists them until they leave. Without it, they come from the timetable
+// and the GTFS-Realtime feed, which only have predictions.
 type lirrSign struct {
 	stop        string // GTFS stop id: "55"
-	directionID uint32 // 0 is eastbound, 1 westbound
+	direction   string // "E" or "W", in the TrainTime app
+	directionID uint32 // the same in GTFS: 0 is eastbound, 1 westbound
 	ahead       time.Duration
 	alerts      transit.AlertFilter
 	// cancelAlertType is the alert type naming canceled trains.
 	cancelAlertType string
 
+	arrivals  *transit.ArrivalFeed
 	trips     *transit.TripFeed
 	alertFeed *transit.AlertFeed
 	static    *transit.File[*lirrStatic]
+}
+
+// lirrStatus is what the sign says about a train, by its status on the
+// TrainTime board. Trains on their way aren't marked.
+var lirrStatus = map[string]string{
+	"EN_ROUTE": "",
+	"ARRIVING": "Arriving",
+	"BERTHED":  "At station",
 }
 
 // lirrStatic is what the sign and the map need from the LIRR static GTFS
@@ -98,6 +113,8 @@ type lirrDepartureJSON struct {
 	Scheduled   time.Time
 	Expected    *time.Time // nil without a live prediction
 	Canceled    bool
+	// Status is "Arriving", "At station" or "Held", or empty.
+	Status string
 }
 
 func (s *lirrSign) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -105,23 +122,71 @@ func (s *lirrSign) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	board := lirrJSON{Departures: []lirrDepartureJSON{}, Alerts: []alertJSON{}}
 
 	if static, ok := s.static.Get(); ok {
-		// Delayed trains can leave well after their scheduled time.
-		scheduled := static.timetable.Departures(now.Add(-time.Hour), now.Add(s.ahead))
-		var live []transit.StopTime
-		canceled := map[string]bool{}
-		if msg, ok := s.trips.Get(now); ok {
-			live = transit.StopTimes(msg, s.stop)
-			canceled = transit.CanceledTrips(msg)
-		}
 		alerts, _ := s.alertFeed.Get(now)
-		for id := range transit.TripsIn(alerts, s.cancelAlertType, now) {
-			canceled[id] = true
+		if arrivals, ok := s.arrivals.Get(now); ok {
+			board = s.trainTimeBoard(static, arrivals, alerts, now)
+		} else {
+			// Delayed trains can leave well after their scheduled time.
+			scheduled := static.timetable.Departures(now.Add(-time.Hour), now.Add(s.ahead))
+			var live []transit.StopTime
+			canceled := map[string]bool{}
+			if msg, ok := s.trips.Get(now); ok {
+				live = transit.StopTimes(msg, s.stop)
+				canceled = transit.CanceledTrips(msg)
+			}
+			for id := range transit.TripsIn(alerts, s.cancelAlertType, now) {
+				canceled[id] = true
+			}
+			board = s.board(static, scheduled, live, canceled, alerts, now)
 		}
-		board = s.board(static, scheduled, live, canceled, alerts, now)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(board)
+}
+
+// trainTimeBoard lists the trains on the TrainTime board in s.direction,
+// with the alerts matching s.alerts.
+func (s *lirrSign) trainTimeBoard(static *lirrStatic, arrivals []transit.TrainArrival, alerts []transit.Alert, now time.Time) lirrJSON {
+	board := lirrJSON{Departures: []lirrDepartureJSON{}, Alerts: matchingAlerts(alerts, s.alerts, now)}
+	byCode := map[string]transit.Stop{}
+	for _, st := range static.stops {
+		byCode[st.Code] = st
+	}
+	for _, a := range arrivals {
+		if a.Direction != s.direction {
+			continue
+		}
+		trip := static.trains[a.TrainNum]
+		d := lirrDepartureJSON{
+			Train:       a.TrainNum,
+			Destination: trip.Headsign,
+			Color:       routeColor(static.routes[trip.RouteID]).Color,
+			Scheduled:   a.Scheduled,
+			Canceled:    a.Canceled,
+		}
+		if n := len(a.Stops); n > 0 {
+			if st, ok := byCode[a.Stops[n-1]]; ok {
+				d.Destination = st.Name
+			}
+		}
+		if a.Late != nil {
+			expected := a.Scheduled.Add(*a.Late)
+			d.Expected = &expected
+		}
+		status, ok := lirrStatus[a.Status]
+		if !ok && a.Status != "" {
+			// Any others as they are: "SOME_STATUS" is "Some status".
+			status = strings.ToUpper(a.Status[:1]) + strings.ToLower(strings.ReplaceAll(a.Status[1:], "_", " "))
+		}
+		if status == "" && a.Held {
+			status = "Held"
+		}
+		d.Status = status
+		board.Departures = append(board.Departures, d)
+	}
+	sort.SliceStable(board.Departures, func(i, j int) bool { return board.Departures[i].Scheduled.Before(board.Departures[j].Scheduled) })
+	return board
 }
 
 // board merges the timetable with live predictions and cancellations,

@@ -9,9 +9,9 @@ type Board = {
 
 // Subway is a countdown sign like the ones at station entrances: the next
 // few trains on each route, and any alerts. It shows whatever src (see
-// subwaySign in the backend) returns.
+// subwaySign in the backend) returns, which lists trains until they leave.
 function Subway({ title, src, count, maxAlerts }: { title: string, src: string, count: number, maxAlerts: number }) {
-  const board = usePoll<Board>(src, 30_000)
+  const board = usePoll<Board>(src, 10_000)
   const now = useTick(10_000)
   if (!board) {
     return null
@@ -22,15 +22,13 @@ function Subway({ title, src, count, maxAlerts }: { title: string, src: string, 
       <Heading title={title} />
       <div className="subway-rows" style={{ gridTemplateColumns: `auto repeat(${count}, auto) auto` }}>
         {board.Routes.map(r => {
-          // The backend only refreshes every minute; drop trains that have
-          // left since then.
-          const times = r.Times.map(t => new Date(t)).filter(t => t > now).slice(0, count)
+          const times = r.Times.slice(0, count).map(t => new Date(t))
           return (
             <div className="subway-row" key={r.Route}>
               <RouteBullet route={r.Route} color={r} />
               {times.length === 0
                 ? <span className="subway-none">–</span>
-                : times.map(t => <Minutes key={t.getTime()} minutes={minutesUntil(t, now)} />)}
+                : times.map((t, i) => <Minutes key={i} minutes={minutesUntil(t, now)} />)}
               <span className="transit-unit">{times.length > 0 && 'min'}</span>
             </div>
           )

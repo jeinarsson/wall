@@ -16,8 +16,10 @@ func TestSubwayBoard(t *testing.T) {
 	stopTimes := []transit.StopTime{
 		{RouteID: "F", Time: at(9)},
 		{RouteID: "E", Time: at(4)},
+		{RouteID: "E", Time: at(4)}, // listed twice
 		{RouteID: "F", Time: at(2)},
-		{RouteID: "E", Time: at(-1)},                // left
+		{RouteID: "F", Time: at(-1)},                // at the platform
+		{RouteID: "E", Time: at(-3)},                // lost
 		{RouteID: "F", Time: at(5), Canceled: true}, // skips the stop
 		{RouteID: "M", Time: at(3)},                 // not shown
 	}
@@ -37,8 +39,8 @@ func TestSubwayBoard(t *testing.T) {
 	if got := b.Routes[0].Times; len(got) != 1 || !got[0].Equal(at(4)) {
 		t.Errorf("E times = %v, want [+4m]", got)
 	}
-	if got := b.Routes[1].Times; len(got) != 2 || !got[0].Equal(at(2)) || !got[1].Equal(at(9)) {
-		t.Errorf("F times = %v, want [+2m +9m]", got)
+	if got := b.Routes[1].Times; len(got) != 3 || !got[0].Equal(at(-1)) || !got[1].Equal(at(2)) || !got[2].Equal(at(9)) {
+		t.Errorf("F times = %v, want [-1m +2m +9m]", got)
 	}
 	if b.Routes[0].Color != "#0062CF" || b.Routes[1].Color != "#808080" {
 		t.Errorf("got colors %s, %s", b.Routes[0].Color, b.Routes[1].Color)
@@ -102,6 +104,54 @@ func TestLIRRBoard(t *testing.T) {
 	}
 	if d := b.Departures[3]; !d.Scheduled.Equal(at(24)) || d.Color != "#00985F" {
 		t.Errorf("extra train = %+v, want scheduled +24m in green", d)
+	}
+}
+
+func TestLIRRTrainTimeBoard(t *testing.T) {
+	s := &lirrSign{direction: "W"}
+	static := &lirrStatic{
+		routes: map[string]transit.Route{"1": {Color: "00985F"}, "2": {Color: "CE8E00"}},
+		stops:  map[string]transit.Stop{"237": {Code: "NYK", Name: "Penn Station"}, "214": {Code: "WDD", Name: "Woodside"}},
+		trains: map[string]transit.Trip{
+			"1579": {RouteID: "1", Headsign: "Penn Station"},
+			"2775": {RouteID: "2", Headsign: "Grand Central"},
+		},
+	}
+	late, early := 2*time.Minute, -10*time.Second
+	arrivals := []transit.TrainArrival{
+		{TrainNum: "2775", Direction: "W", Scheduled: at(30), Status: "EN_ROUTE", Late: &early},
+		{TrainNum: "1579", Direction: "W", Scheduled: at(-1), Status: "BERTHED", Late: &late, Stops: []string{"NYK"}},
+		{TrainNum: "1583", Direction: "W", Scheduled: at(60), Status: "EN_ROUTE", Stops: []string{"WDD"}}, // not in the timetable
+		{TrainNum: "1585", Direction: "W", Scheduled: at(70), Status: "EN_ROUTE", Held: true},
+		{TrainNum: "1587", Direction: "W", Scheduled: at(80), Status: "DOORS_CLOSED", Canceled: true},
+		{TrainNum: "2786", Direction: "E", Scheduled: at(5), Status: "ARRIVING"},
+	}
+
+	b := s.trainTimeBoard(static, arrivals, nil, now)
+
+	want := []struct {
+		train, dest, status string
+		expected            *time.Time
+		canceled            bool
+	}{
+		{"1579", "Penn Station", "At station", ptr(at(1)), false},
+		{"2775", "Grand Central", "", ptr(at(30).Add(early)), false},
+		{"1583", "Woodside", "", nil, false},
+		{"1585", "", "Held", nil, false},
+		{"1587", "", "Doors closed", nil, true},
+	}
+	if len(b.Departures) != len(want) {
+		t.Fatalf("got %d departures, want %d: %+v", len(b.Departures), len(want), b.Departures)
+	}
+	for i, w := range want {
+		d := b.Departures[i]
+		if d.Train != w.train || d.Destination != w.dest || d.Status != w.status || d.Canceled != w.canceled ||
+			(d.Expected == nil) != (w.expected == nil) || (d.Expected != nil && !d.Expected.Equal(*w.expected)) {
+			t.Errorf("departure %d = %+v, want %+v", i, d, w)
+		}
+	}
+	if b.Departures[0].Color != "#00985F" {
+		t.Errorf("got color %s, want the route's", b.Departures[0].Color)
 	}
 }
 

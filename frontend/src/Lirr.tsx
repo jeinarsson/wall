@@ -10,6 +10,7 @@ type Departure = {
   Scheduled: string
   Expected: string | null // null without a live prediction
   Canceled: boolean
+  Status: string // "Arriving", "At station", "Held" or ""
 }
 
 type Board = {
@@ -17,54 +18,66 @@ type Board = {
   Alerts: Alert[]
 }
 
-// Delays from which the expected time is shown, and turns red.
+// Delays from which they are shown, and turn red.
 const LATE = 60_000
 const VERY_LATE = 5 * 60_000
 
+// Note says what is special about a train, if anything: canceled, its
+// status at the station, or else how late it is.
+function Note({ d, delay }: { d: Departure, delay: number }) {
+  if (d.Canceled) {
+    return <span className="lirr-note canceled">Canceled</span>
+  }
+  if (d.Status) {
+    const kind = d.Status === 'Held' ? 'late' : 'here'
+    return <span className={`lirr-note ${kind}`}>{d.Status}</span>
+  }
+  if (delay >= LATE) {
+    return <span className={`lirr-note ${delay >= VERY_LATE ? 'very-late' : 'late'}`}>{Math.round(delay / 60_000)} min late</span>
+  }
+  return <span />
+}
+
+// Row is a train: the minutes count down to its expected time, and the
+// note at the end says if it is late, so that nothing before it moves.
 function Row({ d, now }: { d: Departure, now: Date }) {
   const scheduled = new Date(d.Scheduled)
   const expected = d.Expected ? new Date(d.Expected) : null
   const delay = expected ? expected.getTime() - scheduled.getTime() : 0
-  const lateness = delay >= VERY_LATE ? 'very-late' : delay >= LATE ? 'late' : ''
 
   return (
     <div className={`lirr-row${d.Canceled ? ' canceled' : ''}`}>
       <span className="lirr-dot" style={{ background: d.Color }} />
-      <span className="lirr-time">
-        {format(scheduled, 'HH:mm')}
-        {expected && lateness && <span className={`lirr-expected ${lateness}`}>{format(expected, 'HH:mm')}</span>}
-      </span>
+      <span className="lirr-time">{format(scheduled, 'HH:mm')}</span>
       <span className="lirr-destination">{d.Destination}</span>
       {d.Canceled
-        ? <span className="lirr-canceled">Canceled</span>
+        ? <><span /><span /></>
         : <>
             <Minutes minutes={minutesUntil(expected ?? scheduled, now)} />
             <span className="transit-unit">min</span>
           </>}
+      <Note d={d} delay={delay} />
     </div>
   )
 }
 
 // Lirr is a timetable for one station: the next scheduled trains, with
-// their expected times when late, cancellations, and any alerts. It shows
-// whatever src (see lirrSign in the backend) returns.
+// how late they are, cancellations, whether they are at the station, and
+// any alerts. It shows whatever src (see lirrSign in the backend)
+// returns, which lists trains until they leave.
 function Lirr({ title, src, count, maxAlerts }: { title: string, src: string, count: number, maxAlerts: number }) {
-  const board = usePoll<Board>(src, 30_000)
+  const board = usePoll<Board>(src, 10_000)
   const now = useTick(10_000)
   if (!board) {
     return null
   }
 
-  // Show count trains that will run, and any canceled ones among them. The
-  // backend only refreshes every minute; drop trains that have left since.
+  // Show count trains that run, and any canceled ones among them.
   const rows: Departure[] = []
   let running = 0
   for (const d of board.Departures) {
     if (running === count) {
       break
-    }
-    if (new Date(d.Expected ?? d.Scheduled) <= now) {
-      continue
     }
     rows.push(d)
     if (!d.Canceled) {
