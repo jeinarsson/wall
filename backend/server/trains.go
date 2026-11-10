@@ -2,12 +2,18 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
 	"time"
 	_ "time/tzdata" // for the LIRR timetable, wherever this runs
 
+	"github.com/jeinarsson/wall/basemap"
 	"github.com/jeinarsson/wall/transit"
 )
 
@@ -27,8 +33,16 @@ const (
 	subwayAlerts = "https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/camsys%2Fsubway-alerts.json"
 	lirrAlerts   = "https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/camsys%2Flirr-alerts.json"
 
-	// GPS positions of LIRR trains, from the TrainTime app's backend.
+	// GPS positions of LIRR trains, from the TrainTime app's backend: all
+	// of them, and one.
 	lirrLocations = "https://backend-unified.mylirr.org/locations?geometry=NONE&railroad=LIRR"
+	lirrLocation  = "https://backend-unified.mylirr.org/locations/%s?geometry=NONE"
+
+	// Streets, parks and water for the map, from OpenStreetMap: the main
+	// Overpass API instance, then a mirror. Others are listed at
+	// https://wiki.openstreetmap.org/wiki/Overpass_API#Public_Overpass_API_instances
+	overpass       = "https://overpass-api.de/api/interpreter?data="
+	overpassMirror = "https://overpass.private.coffee/api/interpreter?data="
 )
 
 // minorAlerts are the alert types that don't say anything about whether
@@ -38,10 +52,15 @@ var minorAlerts = []string{"Station Notice", "Special Notice", "Boarding Change"
 // severeAlerts matches the alert types shown in red rather than amber.
 var severeAlerts = regexp.MustCompile(`Suspend|Cancel|Severe`)
 
-// positionInterval is how often the trains on the map are refreshed. Not
-// a divisor of a minute, so that the polls don't keep hitting the feeds at
-// the same point in their own update cycles.
-const positionInterval = 17 * time.Second
+// How often the trains on the map are refreshed: the subway feeds, which
+// are updated every 7-15 s, and the GPS fixes of the LIRR trains on the
+// map, which come every few seconds. Not divisors of a minute, so that the
+// polls don't keep hitting the feeds at the same point in their own update
+// cycles.
+const (
+	positionInterval = 17 * time.Second
+	gpsInterval      = 7 * time.Second
+)
 
 type poller interface {
 	Poll(ctx context.Context, interval time.Duration)
@@ -52,8 +71,10 @@ type trains struct {
 	lirr      *lirrSign
 	trainMap  *trainMap
 	static    []poller // refreshed daily
+	basemaps  []poller // refreshed monthly
 	live      []poller // refreshed every minute
 	positions []poller // refreshed every positionInterval, for the map
+	gps       []poller // refreshed every gpsInterval, for the map
 }
 
 func newTrains(cacheDir string) (*trains, error) {
@@ -68,21 +89,86 @@ func newTrains(cacheDir string) (*trains, error) {
 	const forestHillsLIRR = "55"
 
 	subwayStatic := transit.NewFile(staticSubway, cached("gtfs_subway.zip"), transit.FromZip(loadSubwayStatic([]string{"E", "F"})))
-	stations := transit.NewFile(subwayStations, cached("stations.csv"), transit.FromCSV(transit.LoadStations))
+	stations := transit.NewFile(subwayStations, cached("stations.csv"), transit.FromFile(transit.LoadStations))
 	lirrStatic := transit.NewFile(staticLIRR, cached("gtfs_lirr.zip"), transit.FromZip(loadLIRRStatic(forestHillsLIRR, nyc)))
 	ace := transit.NewTripFeed(feedACE)
 	bdfm := transit.NewTripFeed(feedBDFM)
 	lirrTrips := transit.NewTripFeed(feedLIRR)
 	subwayAlertFeed := transit.NewAlertFeed(subwayAlerts)
 	lirrAlertFeed := transit.NewAlertFeed(lirrAlerts)
-	lirrTrains := transit.NewLocationFeed(lirrLocations)
+	lirrList := transit.NewLocationFeed(lirrLocations)
+
+	// The map shows Forest Hills a third from the left and about halfway
+	// up, and the tracks from Jamaica to Locust Manor on the Atlantic
+	// Branch, where most trains come from, and some of the Main Line.
+	// Turned so that the tracks run across the screen.
+	view := mapView{
+		Center: transit.LatLon{Lat: 40.71255, Lon: -73.82166},
+		Width:  12_500, Height: 3_600,
+		Rotate: 30,
+	}
+	mapArea := view.bounds(500)
+	b := view.bounds(1000) // for the edges, which fade out
+	query := basemap.Query(b.South, b.West, b.North, b.East)
+	// Named by the query, so that it is fetched again if the view changes.
+	// Once it is, those for other views are removed.
+	hash := sha256.Sum256([]byte(query))
+	basemapFile := cached(fmt.Sprintf("basemap-%x.json", hash[:4]))
+	streets := transit.NewFile(overpass+url.QueryEscape(query), basemapFile,
+		transit.FromFile(func(r io.Reader) (*basemap.Layers, error) {
+			layers, err := basemap.Load(r, 2)
+			if err != nil {
+				return nil, err
+			}
+			if old, err := filepath.Glob(cached("basemap-*.json")); err == nil {
+				for _, f := range old {
+					if f != basemapFile {
+						os.Remove(f)
+					}
+				}
+			}
+			return &layers, nil
+		})).
+		WithMirrors(overpassMirror + url.QueryEscape(query)).
+		WithHeader(http.Header{"User-Agent": {"wall (github.com/jeinarsson/wall)"}})
 
 	south, west := uint32(1), uint32(1)
 
+	// The same trains as on the signs, on their way to Forest Hills.
+	tm := &trainMap{
+		view:           view,
+		area:           mapArea,
+		subwayRoutes:   []string{"E", "F"},
+		subwayPlatform: "G08S",
+		subwayModel:    transit.SubwayModel{Dwell: 20 * time.Second, Speed: 10},
+		lirrStation:    forestHillsLIRR,
+		lirrDirection:  "W",
+		lirrAhead:      20 * time.Second,
+
+		subwayTrips:  []*transit.TripFeed{ace, bdfm},
+		subwayStatic: subwayStatic,
+		lirrStatic:   lirrStatic,
+		basemap:      streets,
+	}
+	// Follow the LIRR trains for the map, and those that will be on it
+	// in a few minutes.
+	watchArea := view.bounds(5000)
+	lirrTrains := &lirrPositions{
+		list: lirrList,
+		url:  func(id string) string { return fmt.Sprintf(lirrLocation, url.PathEscape(id)) },
+		watch: func(t transit.TrainLocation) bool {
+			static, ok := lirrStatic.Get()
+			return ok && watchArea.Contains(t.LatLon) && tm.wantsLIRR(static, t)
+		},
+	}
+	tm.lirrTrains = lirrTrains
+
 	return &trains{
 		static:    []poller{subwayStatic, stations, lirrStatic},
-		live:      []poller{lirrTrips, subwayAlertFeed, lirrAlertFeed},
-		positions: []poller{ace, bdfm, lirrTrains},
+		basemaps:  []poller{streets},
+		live:      []poller{lirrTrips, subwayAlertFeed, lirrAlertFeed, lirrList},
+		positions: []poller{ace, bdfm},
+		gps:       []poller{lirrTrains},
 
 		// Manhattan-bound E and F from Forest Hills-71 Av. On Queens Blvd
 		// "S" is towards Manhattan, and "N" towards Jamaica.
@@ -132,21 +218,7 @@ func newTrains(cacheDir string) (*trains, error) {
 			static:    lirrStatic,
 		},
 
-		// The same trains on their way to Forest Hills, from a bit west
-		// of it to a few stops beyond Jamaica. The frontend shows part
-		// of this area.
-		trainMap: &trainMap{
-			area:           transit.BBox{West: -73.880, South: 40.660, East: -73.735, North: 40.735},
-			subwayRoutes:   []string{"E", "F"},
-			subwayPlatform: "G08S",
-			lirrStation:    forestHillsLIRR,
-			lirrDirection:  "W",
-
-			subwayTrips:  []*transit.TripFeed{ace, bdfm},
-			subwayStatic: subwayStatic,
-			lirrTrains:   lirrTrains,
-			lirrStatic:   lirrStatic,
-		},
+		trainMap: tm,
 	}, nil
 }
 
@@ -157,7 +229,13 @@ func (t *trains) poll(ctx context.Context) {
 	for _, p := range t.live {
 		go p.Poll(ctx, time.Minute)
 	}
+	for _, p := range t.basemaps {
+		go p.Poll(ctx, 30*24*time.Hour)
+	}
 	for _, p := range t.positions {
 		go p.Poll(ctx, positionInterval)
+	}
+	for _, p := range t.gps {
+		go p.Poll(ctx, gpsInterval)
 	}
 }

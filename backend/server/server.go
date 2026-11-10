@@ -111,7 +111,8 @@ func main() {
 	http.HandleFunc("/api/calendarEvents", s.getCalendarEvents)
 	http.Handle("/api/subway", s.trains.subway)
 	http.Handle("/api/lirr", s.trains.lirr)
-	http.Handle("/api/trainmap", s.trains.trainMap)
+	http.HandleFunc("/api/map", s.trains.trainMap.ServeMap)
+	http.HandleFunc("/api/map/trains", s.trains.trainMap.ServeTrains)
 	if *staticDir != "" {
 		http.Handle("/", spaHandler(*staticDir))
 	}

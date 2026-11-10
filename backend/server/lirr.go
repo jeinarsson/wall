@@ -35,7 +35,9 @@ type lirrStatic struct {
 	shapes    map[string]transit.Path
 	// trains has a trip for each train number, for its route and shape.
 	trains map[string]transit.Trip
-	served map[string]bool // stops where passengers get on or off
+	// stations has, for each shape, the stations on it (stops where
+	// passengers get on or off) by how far along it they are.
+	stations map[string]map[string]float64
 }
 
 // loadLIRRStatic returns a loader for the static data of a sign at stop,
@@ -70,7 +72,17 @@ func loadLIRRStatic(stop string, loc *time.Location) func(fs.FS) (*lirrStatic, e
 		if err != nil {
 			return nil, err
 		}
-		return &lirrStatic{routes: routes, stops: stops, timetable: tt, shapes: shapes, trains: trains, served: served}, nil
+		stations := map[string]transit.Stop{}
+		for id, s := range stops {
+			if served[id] {
+				stations[id] = s
+			}
+		}
+		along := map[string]map[string]float64{}
+		for id, p := range shapes {
+			along[id] = transit.StopsAlong(p, stations, nearTrack)
+		}
+		return &lirrStatic{routes: routes, stops: stops, timetable: tt, shapes: shapes, trains: trains, stations: along}, nil
 	}
 }
 

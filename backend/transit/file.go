@@ -224,8 +224,3 @@ func (f *File[T]) Get() (T, bool) {
 	defer f.mu.Unlock()
 	return f.data, f.loaded
 }
-
-// FromCSV is the old name of FromFile.
-func FromCSV[T any](load func(io.Reader) (T, error)) func(path string) (T, error) {
-	return FromFile(load)
-}

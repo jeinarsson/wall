@@ -163,7 +163,7 @@
   left: 52vh;
   right: 0;
   bottom: 0;
-  height: 27vh;
+  height: 36vh;
   background: var(--bg);
   mask-image:
     linear-gradient(to right, transparent, black 12%, black 88%, transparent),
@@ -220,53 +220,47 @@
   stroke-dasharray: 4 3;
 }
 
-.trainmap-station circle {
-  r: 3.5px;
+.trainmap-station {
+  r: 3px;
   fill: var(--bg);
   stroke: var(--text-muted);
   stroke-width: 1.5;
 }
 
-.trainmap-station.subway circle {
+.trainmap-station.subway {
   r: 2px;
-  fill: #46443f;
+  fill: #5a5852;
   stroke: none;
 }
 
-.trainmap-station.home circle {
-  r: 4.5px;
+.trainmap-station.home {
+  r: 4px;
   stroke: var(--accent);
   stroke-width: 2;
 }
 
-.trainmap-station.subway.home circle {
+.trainmap-station.subway.home {
   r: 3px;
   fill: var(--accent);
 }
 
-.trainmap-station text {
-  font-size: 1.5vh;
+.trainmap-label {
   fill: var(--text-faint);
-  transform: translate(0.7em, -0.5em);
 }
 
-.trainmap-station.home text {
+.trainmap-label.subway {
+  font-size: 0.85em;
+  fill: #4a4844;
+}
+
+.trainmap-label.home {
   fill: var(--text-muted);
 }
 
-.trainmap-train path {
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 4;
-  stroke-linecap: butt;
-}
-
-/* The front of the train. */
-.trainmap-train circle {
-  r: 3.5px;
-  fill: currentColor;
+.trainmap-train {
   stroke: var(--bg);
-  stroke-width: 1;
+  stroke-width: 0.75;
+  stroke-linejoin: round;
 }
 
 .trainmap-credit {

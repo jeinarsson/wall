@@ -35,6 +35,10 @@ type subwayStatic struct {
 	routes map[string]transit.Route
 	stops  map[string]transit.Stop
 	shapes map[string]transit.Path // of the routes on the map
+	// stations has, for each shape, the stations on it by how far along
+	// it they are. Stations are the stops without a direction ("G08");
+	// their platforms ("G08S") are in the same place.
+	stations map[string]map[string]float64
 }
 
 // loadSubwayStatic returns a loader for the static data, with the shapes
@@ -56,7 +60,17 @@ func loadSubwayStatic(routes []string) func(fs.FS) (*subwayStatic, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &subwayStatic{routes: r, stops: stops, shapes: shapes}, nil
+		stations := map[string]transit.Stop{}
+		for id, s := range stops {
+			if !strings.HasSuffix(id, "N") && !strings.HasSuffix(id, "S") {
+				stations[id] = s
+			}
+		}
+		along := map[string]map[string]float64{}
+		for id, p := range shapes {
+			along[id] = transit.StopsAlong(p, stations, nearTrack)
+		}
+		return &subwayStatic{routes: r, stops: stops, shapes: shapes, stations: along}, nil
 	}
 }
 

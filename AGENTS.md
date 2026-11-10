@@ -5,7 +5,8 @@ running a Go server and two Chromium kiosk windows.
 
 - **Top screen** (`/top`): a large clock over slowly drifting contour lines,
   with train signs in the bottom-left corner: Manhattan-bound E/F subway from
-  Forest Hills-71 Av and westbound LIRR from Forest Hills.
+  Forest Hills-71 Av and westbound LIRR from Forest Hills. To their right, a
+  map of the tracks with those trains moving along them.
 - **Bottom screen** (`/bottom`): a rolling month calendar of several Google
   Calendars.
 
@@ -18,12 +19,17 @@ backend/            Go workspace (go.work)
     trains.go       everything specific to where the wall hangs: feeds, stops, filters
     subway.go       subwaySign: countdown per route + filtered alerts -> /api/subway
     lirr.go         lirrSign: timetable merged with live data -> /api/lirr
+    trainmap.go     trainMap: map, tracks, stations -> /api/map; trains -> /api/map/trains
+    lirrpositions.go  polls the GPS of the few LIRR trains on the map
   gcal/             thin Google Calendar client (service account)
-  transit/          generic GTFS / GTFS-Realtime plumbing for the MTA feeds
+  transit/          generic GTFS / GTFS-Realtime plumbing for the MTA feeds,
+                    geometry (geo.go) and how trains move (motion.go)
+  basemap/          OpenStreetMap roads, parks and water via the Overpass API
 frontend/           React + TypeScript + Vite
-  src/Top.tsx       clock screen; places <Subway> and <Lirr>
+  src/Top.tsx       clock screen; places <Subway>, <Lirr> and <TrainMap>
   src/Bottom.tsx    calendar screen (Month.tsx, CustomRbc/ for react-big-calendar)
   src/Subway.tsx, Lirr.tsx, Sign.tsx, transit.ts, transit.css   train signs
+  src/TrainMap.tsx  the map, drawn as SVG
   src/theme.css     shared palette and fonts
 scripts/deploy.sh   git pull, build frontend and backend into bin/wall
 scripts/run.sh      run server (with restart), wifi watchdog, both kiosk windows
@@ -49,7 +55,7 @@ Secrets and generated files are not in git: `backend/wall-gcloud.key`
 ## Tests and checks
 
 ```sh
-cd backend && go vet ./server ./transit && go test ./server ./transit
+cd backend && go vet ./server ./transit ./basemap && go test ./server ./transit ./basemap
 cd frontend && npm run build && npx eslint src/
 ```
 
@@ -92,6 +98,48 @@ MTA data quirks worth knowing:
   the previous service date.
 - Feeds keep trips for a while after they leave; always filter out past
   times.
+- Subway trips are listed before they start, with vehicle timestamps in
+  the future; a trip is under way once its timestamp has passed. Most trip
+  ids end with their shape (`089900_E..S69R`), but some only with route and
+  direction (`121550_F..S`).
+- The subway vehicle status is always `STOPPED_AT`, meaning "at or last
+  passed" that stop; its timestamp is the latest report, not the arrival.
+  The report in which the stop changes is the arrival, and arrivals are the
+  only reliable events (seen 5-18 s after they happen). Predictions are
+  revised by up to a minute at every update. A stop drops off the trip
+  about 30 s after a report, which says nothing about departure. The ACE
+  feed is updated every 6-9 s, BDFM every ~15 s.
+- LIRR GTFS-RT vehicle positions are snapped to stations and often stale.
+  Real GPS (fixes every 2-6 s, with speed, heading and cars) comes from the
+  TrainTime app's backend, `backend-unified.mylirr.org` with header
+  `Accept-Version: 3.0`; it is undocumented. `/locations` lists all trains
+  (~14 KB gzipped), `/locations/{train_id}` is one (~1 KB). Its stop codes
+  ("FHL") are the GTFS `stop_code`.
+
+## Train map
+
+The map shows the trains that the signs list, while they are on their way
+through the area around the station.
+
+- **View and data**: `trainMap.view` in `server/trains.go` is the part of
+  the map shown (center, width and height in meters, rotation); it also
+  decides which trains and tracks are sent and the area of the basemap.
+  Tracks and stations come from the GTFS shapes and stops; the basemap is
+  fetched from the Overpass API by `basemap` once a month, cached under a
+  name from the query (so changing the view fetches it anew; the first
+  fetch takes a minute). `/api/map` has all of this and changes daily;
+  `/api/map/trains` has the trains, and is polled every 5 s.
+- **LIRR** trains are where their GPS says, then go on at their speed until
+  their next stop, for at most 20 s (`transit.DeadReckon`). The list of
+  trains is fetched every minute, and the trains on (or nearing) the map
+  one by one every 7 s. Over 17 s this is off by 12 m median, 66 m p90.
+- **Subway** trains stand at the stop they last arrived at, run to the next
+  at an average speed, and wait there until the feed says they got there
+  (`transit.SubwayModel`, with `transit.Arrivals` remembering arrivals).
+  They never move backwards, and are at most a stop ahead of the data.
+- Each train comes with a path and knots (time, meters along the path);
+  the frontend moves it along them at 10 fps, the same way as
+  `transit.PositionAt`, and glides to where new data puts it.
 
 ## Calendar
 

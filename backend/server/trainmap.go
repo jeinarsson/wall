@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"math"
 	"net/http"
 	"slices"
 	"sort"
@@ -9,29 +10,65 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jeinarsson/wall/basemap"
 	"github.com/jeinarsson/wall/transit"
 )
 
-// trainMap is a map of the tracks around the station, with the trains
-// that are on their way to it. The LIRR trains are where their GPS says;
-// subway trains have no GPS (they're underground), so their way is planned
-// from the predicted times at their next stops.
+// trainMap is a map of the tracks around the station, with the trains on
+// their way to it. It serves the map (/api/map), which changes daily, and
+// the trains on it (/api/map/trains).
+//
+// The LIRR trains are where their GPS says, and go on at their speed until
+// the next fix. Subway trains have no GPS (they're underground); they are
+// placed from their arrivals at stops (see transit.SubwayModel).
 type trainMap struct {
-	area transit.BBox
+	view mapView
+	area transit.BBox // trains and tracks shown; somewhat more than view
 	// Subway trains on routes that will still leave from platform.
 	subwayRoutes   []string
 	subwayPlatform string // "G08S"
-	// LIRR trains in direction that will still stop at lirrStation.
+	subwayModel    transit.SubwayModel
+	// LIRR trains in direction that will still stop at lirrStation, going
+	// on from their last GPS fix for at most lirrAhead.
 	lirrStation   string // GTFS stop id: "55"
 	lirrDirection string // "E" or "W"
+	lirrAhead     time.Duration
 
 	subwayTrips  []*transit.TripFeed
 	subwayStatic *transit.File[*subwayStatic]
-	// arrivals is updated on every request, which the frontend makes more
-	// often than the feeds are refreshed.
-	arrivals   arrivals
-	lirrTrains *transit.LocationFeed
+	// arrivals is updated on every request for the trains, which the
+	// frontend makes more often than the feeds are refreshed.
+	arrivals   transit.Arrivals
+	lirrTrains *lirrPositions
 	lirrStatic *transit.File[*lirrStatic]
+	basemap    *transit.File[*basemap.Layers]
+
+	mu     sync.Mutex
+	cached mapCache
+}
+
+// mapView is the part of the map shown: Width x Height meters around
+// Center, turned Rotate degrees counterclockwise, so that the tracks can
+// run along the screen.
+type mapView struct {
+	Center        transit.LatLon
+	Width, Height float64
+	Rotate        float64
+}
+
+// bounds is a bounding box of the view and margin meters around it.
+func (v mapView) bounds(margin float64) transit.BBox {
+	k := math.Cos(v.Center.Lat*math.Pi/180) * 111_320
+	sin, cos := math.Sincos(v.Rotate * math.Pi / 180)
+	b := transit.BBox{West: math.Inf(1), South: math.Inf(1), East: math.Inf(-1), North: math.Inf(-1)}
+	for _, c := range [][2]float64{{-1, -1}, {-1, 1}, {1, -1}, {1, 1}} {
+		// A corner of the view, turned back to north up.
+		x, y := c[0]*(v.Width/2+margin), c[1]*(v.Height/2+margin)
+		lon := v.Center.Lon + (x*cos+y*sin)/k
+		lat := v.Center.Lat + (-x*sin+y*cos)/111_320
+		b = transit.BBox{West: min(b.West, lon), South: min(b.South, lat), East: max(b.East, lon), North: max(b.North, lat)}
+	}
+	return b
 }
 
 // Car lengths in meters, and how many cars when the feed doesn't say.
@@ -47,9 +84,19 @@ const (
 const nearTrack = 60
 
 type mapJSON struct {
+	View     viewJSON
+	Basemap  basemap.Layers // nil until loaded
 	Tracks   []trackJSON
 	Stations []stationJSON
-	Trains   []mapTrainJSON
+	// Complete is false until all the static data has been loaded; until
+	// then, ask again soon.
+	Complete bool
+}
+
+type viewJSON struct {
+	Center        [2]float64 // lon, lat
+	Width, Height float64    // meters
+	Rotate        float64    // degrees counterclockwise
 }
 
 // trackJSON is a set of track segments: [lon, lat, lon, lat], ...
@@ -66,38 +113,105 @@ type stationJSON struct {
 	Home bool // the station the map is for
 }
 
-// mapTrainJSON is a train on Path, a list of lon, lat. Its middle moves
-// from knot to knot along Path: steadily, or if Ease is set, speeding up
-// after each knot and slowing down into the next, like a train between
-// stations. Before the first knot and after the last it stands still.
+type trainsJSON struct {
+	Trains []mapTrainJSON
+}
+
+// mapTrainJSON is a train on Path, a list of lon, lat. Its middle follows
+// Knots along Path, easing between them with Ease (see
+// transit.PositionAt).
 type mapTrainJSON struct {
 	ID    string
 	Kind  string // "lirr" or "subway"
 	Label string // route or train number
 	colorJSON
 	Cars      int
-	CarLength float64
+	CarLength float64 // meters
 	Path      []float64
-	Knots     []knot
+	Knots     []transit.Knot
 	Ease      bool
 }
 
-// knot is where a train is at a time, in meters along its path.
-type knot struct {
-	Time  time.Time
-	Along float64
+// mapCache is the map as JSON, made from the static data it holds.
+type mapCache struct {
+	lirr   *lirrStatic
+	subway *subwayStatic
+	layers *basemap.Layers
+	json   []byte
 }
 
-func (m *trainMap) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	now := time.Now()
+// ServeMap serves the map: what it shows, the basemap, tracks and stations.
+func (m *trainMap) ServeMap(w http.ResponseWriter, r *http.Request) {
+	lirr, _ := m.lirrStatic.Get()
+	subway, _ := m.subwayStatic.Get()
+	layers, _ := m.basemap.Get()
+
+	m.mu.Lock()
+	c := m.cached
+	if c.json == nil || c.lirr != lirr || c.subway != subway || c.layers != layers {
+		c = mapCache{lirr, subway, layers, nil}
+		c.json, _ = json.Marshal(m.board(lirr, subway, layers))
+		m.cached = c
+	}
+	m.mu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(c.json)
+}
+
+// board is the map, with whichever static data has been loaded.
+func (m *trainMap) board(lirr *lirrStatic, subway *subwayStatic, layers *basemap.Layers) mapJSON {
 	out := mapJSON{
+		View: viewJSON{
+			Center: [2]float64{m.view.Center.Lon, m.view.Center.Lat},
+			Width:  m.view.Width, Height: m.view.Height, Rotate: m.view.Rotate,
+		},
 		Tracks:   []trackJSON{},
 		Stations: []stationJSON{},
-		Trains:   []mapTrainJSON{},
+		Complete: lirr != nil && subway != nil && layers != nil,
 	}
+	if layers != nil {
+		out.Basemap = *layers
+	}
+	if lirr != nil {
+		out.Tracks = append(out.Tracks, trackJSON{"lirr", segments(transit.Network(sortedShapes(lirr.shapes), m.area))})
+		out.Stations = append(out.Stations, m.stations(lirr.stations, lirr.stops, "lirr", m.lirrStation)...)
+	}
+	if subway != nil {
+		out.Tracks = append(out.Tracks, trackJSON{"subway", segments(transit.Network(sortedShapes(subway.shapes), m.area))})
+		out.Stations = append(out.Stations, m.stations(subway.stations, subway.stops, "subway", station(m.subwayPlatform))...)
+	}
+	return out
+}
+
+// stations lists the stations in the area on any of the shapes.
+func (m *trainMap) stations(byShape map[string]map[string]float64, stops map[string]transit.Stop, kind, home string) []stationJSON {
+	seen := map[string]bool{}
+	var out []stationJSON
+	for _, stations := range byShape {
+		for id := range stations {
+			s := stops[id]
+			if seen[id] || !m.area.Contains(s.LatLon) {
+				continue
+			}
+			seen[id] = true
+			out = append(out, stationJSON{Name: s.Name, Kind: kind, Lon: s.Lon, Lat: s.Lat, Home: id == home})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+// ServeTrains serves the trains on the map.
+func (m *trainMap) ServeTrains(w http.ResponseWriter, r *http.Request) {
+	now := time.Now()
+	out := trainsJSON{Trains: []mapTrainJSON{}}
 	if static, ok := m.lirrStatic.Get(); ok {
-		trains, _ := m.lirrTrains.Get(now)
-		m.lirrBoard(&out, static, trains)
+		for _, t := range m.lirrTrains.Get(now) {
+			if tr, ok := m.lirrTrain(static, t); ok {
+				out.Trains = append(out.Trains, tr)
+			}
+		}
 	}
 	if static, ok := m.subwayStatic.Get(); ok {
 		var trips []transit.LiveTrip
@@ -106,160 +220,179 @@ func (m *trainMap) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				trips = append(trips, transit.LiveTrips(msg)...)
 			}
 		}
-		m.arrivals.update(trips, now)
-		m.subwayBoard(&out, static, trips, now)
+		m.arrivals.Update(trips, now)
+		for _, t := range trips {
+			if tr, ok := m.subwayTrain(static, t, now); ok {
+				out.Trains = append(out.Trains, tr)
+			}
+		}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(out)
 }
 
-// lirrBoard adds the LIRR's tracks, its stations and trains to out.
-func (m *trainMap) lirrBoard(out *mapJSON, static *lirrStatic, trains []transit.TrainLocation) {
-	shapes := sortedShapes(static.shapes)
-	out.Tracks = append(out.Tracks, trackJSON{Kind: "lirr", Segments: segments(transit.Network(shapes, m.area))})
-	stations := map[string]transit.Stop{}
-	for id, s := range static.stops {
-		if static.served[id] {
-			stations[id] = s
-		}
+// wantsLIRR reports whether t is a train for the map: in the right
+// direction and still to stop at the station.
+func (m *trainMap) wantsLIRR(static *lirrStatic, t transit.TrainLocation) bool {
+	if t.Canceled || t.Direction != m.lirrDirection {
+		return false
 	}
-	out.Stations = append(out.Stations, stationsOn(stations, shapes, m.area, "lirr", m.lirrStation)...)
-
 	home := static.stops[m.lirrStation].Code
-	codes := map[string]transit.Stop{}
-	for _, s := range static.stops {
-		codes[s.Code] = s
+	for _, s := range t.Stops {
+		if s.Code == home {
+			return !s.Departed && !s.Canceled
+		}
 	}
-
-	for _, t := range trains {
-		if t.Canceled || t.Direction != m.lirrDirection || !m.area.Contains(t.LatLon) {
-			continue
-		}
-		var next *transit.TrainLocationStop
-		stopsHome := false
-		for i, s := range t.Stops {
-			if s.Departed || s.Canceled {
-				continue
-			}
-			if next == nil {
-				next = &t.Stops[i]
-			}
-			if s.Code == home {
-				stopsHome = true
-			}
-		}
-		if !stopsHome {
-			continue
-		}
-
-		// The train's own shape, so that its cars follow the right
-		// branch; or else whichever track is nearest.
-		trip := static.trains[t.TrainNum]
-		path, ok := static.shapes[trip.ShapeID]
-		along, off := path.Locate(t.LatLon)
-		if !ok || off > nearTrack {
-			for _, p := range shapes {
-				if a, o := p.Locate(t.LatLon); o < off {
-					path, along, off = p, a, o
-				}
-			}
-		}
-		if off > nearTrack {
-			continue
-		}
-
-		piece, start := path.Within(m.area, along)
-		until := piece.Length()
-		if next != nil {
-			if a, o := piece.Locate(codes[next.Code].LatLon); o < nearTrack && a >= along-start {
-				until = a
-			}
-		}
-		// Go on at the speed the GPS says, until the next stop.
-		knots := []knot{{t.Time, along - start}}
-		if t.GPS && t.Speed > 0.5 && until > along-start {
-			knots = append(knots, knot{t.Time.Add(seconds((until - along + start) / t.Speed)), until})
-		}
-		cars := t.Cars
-		if cars == 0 {
-			cars = lirrCars
-		}
-		out.Trains = append(out.Trains, mapTrainJSON{
-			ID:        "lirr-" + t.TrainNum,
-			Kind:      "lirr",
-			Label:     t.TrainNum,
-			colorJSON: routeColor(static.routes[trip.RouteID]),
-			Cars:      cars,
-			CarLength: lirrCarLength,
-			Path:      flatten(piece.Points),
-			Knots:     knots,
-		})
-	}
+	return false
 }
 
-// subwayBoard adds the subway's tracks, its stations and trains to out.
-func (m *trainMap) subwayBoard(out *mapJSON, static *subwayStatic, trips []transit.LiveTrip, now time.Time) {
-	shapes := sortedShapes(static.shapes)
-	out.Tracks = append(out.Tracks, trackJSON{Kind: "subway", Segments: segments(transit.Network(shapes, m.area))})
-	// Platforms ("G08S") are at their stations ("G08"), which are the
-	// stops without a direction.
-	home := m.subwayPlatform[:len(m.subwayPlatform)-1]
-	stations := map[string]transit.Stop{}
-	for id, s := range static.stops {
-		if !strings.HasSuffix(id, "N") && !strings.HasSuffix(id, "S") {
-			stations[id] = s
-		}
+// lirrTrain places an LIRR train on its shape (or else the nearest track)
+// and plans its way from its GPS fix to its next stop.
+func (m *trainMap) lirrTrain(static *lirrStatic, t transit.TrainLocation) (mapTrainJSON, bool) {
+	if !m.area.Contains(t.LatLon) || !m.wantsLIRR(static, t) {
+		return mapTrainJSON{}, false
 	}
-	out.Stations = append(out.Stations, stationsOn(stations, shapes, m.area, "subway", home)...)
-	var inArea []transit.LatLon
-	for _, s := range stations {
-		if m.area.Contains(s.LatLon) {
-			inArea = append(inArea, s.LatLon)
-		}
-	}
-
-	for _, t := range trips {
-		started := !t.Reported.IsZero() && !t.Reported.After(now)
-		if !slices.Contains(m.subwayRoutes, t.RouteID) || !started || !leavesFrom(t, m.subwayPlatform, now) {
-			continue
-		}
-		// NYCT trip ids end with the shape: "089900_E..S69R".
-		_, shapeID, _ := strings.Cut(t.TripID, "_")
-		path, ok := static.shapes[shapeID]
-		if !ok {
-			continue
-		}
-		var stations []float64
-		for _, s := range inArea {
-			if a, off := path.Locate(s); off < nearTrack {
-				stations = append(stations, a)
+	// The train's own shape, so that it follows the right branch; or else
+	// the nearest one in its direction.
+	trip := static.trains[t.TrainNum]
+	shapeID := trip.ShapeID
+	path, ok := static.shapes[shapeID]
+	along, off := path.Locate(t.LatLon)
+	if !ok || off > nearTrack {
+		for id, p := range static.shapes {
+			if a, o := p.Locate(t.LatLon); o < off && heading(p, a, t.Heading) {
+				shapeID, path, along, off = id, p, a, o
 			}
 		}
-		var arr *arrival
-		if a, ok := m.arrivals.get(t.TripID); ok {
-			arr = &a
+	}
+	if off > nearTrack {
+		return mapTrainJSON{}, false
+	}
+
+	piece, start := path.Within(m.area, along)
+	until := piece.Length()
+	codes := map[string]string{}
+	for id := range static.stations[shapeID] {
+		codes[static.stops[id].Code] = id
+	}
+	for _, s := range t.Stops {
+		if a, ok := static.stations[shapeID][codes[s.Code]]; ok && !s.Departed && !s.Canceled && a >= along {
+			until = a - start
+			break
 		}
-		knots := subwayKnots(t, arr, path, static.stops, stations, now)
-		along, ok := positionAt(knots, now)
-		if !ok || !m.area.Contains(path.At(along)) {
+	}
+	speed := t.Speed
+	if !t.GPS {
+		speed = 0
+	}
+	cars := t.Cars
+	if cars == 0 {
+		cars = lirrCars
+	}
+	return mapTrainJSON{
+		ID:        "lirr-" + t.TrainNum,
+		Kind:      "lirr",
+		Label:     t.TrainNum,
+		colorJSON: routeColor(static.routes[trip.RouteID]),
+		Cars:      cars,
+		CarLength: lirrCarLength,
+		Path:      flatten(piece.Points),
+		Knots:     transit.DeadReckon(t.Time, along-start, speed, until, m.lirrAhead),
+	}, true
+}
+
+// heading reports whether p runs within 90° of heading (degrees clockwise
+// from north) at along.
+func heading(p transit.Path, along, heading float64) bool {
+	a, b := p.At(along-10), p.At(along+10)
+	east := (b.Lon - a.Lon) * math.Cos(a.Lat*math.Pi/180)
+	north := b.Lat - a.Lat
+	sin, cos := math.Sincos(heading * math.Pi / 180)
+	return east*sin+north*cos > 0
+}
+
+// subwayTrain places a subway train on its shape, if it is one for the
+// map: on the right route, under way, and still to leave from the
+// platform.
+func (m *trainMap) subwayTrain(static *subwayStatic, t transit.LiveTrip, now time.Time) (mapTrainJSON, bool) {
+	started := !t.Reported.IsZero() && !t.Reported.After(now)
+	if !slices.Contains(m.subwayRoutes, t.RouteID) || !started || !leavesFrom(t, m.subwayPlatform, now) {
+		return mapTrainJSON{}, false
+	}
+	shapeID, ok := tripShape(static, t)
+	if !ok {
+		return mapTrainJSON{}, false
+	}
+	path, stations := static.shapes[shapeID], static.stations[shapeID]
+	along := func(stopID string) (float64, bool) {
+		a, ok := stations[station(stopID)]
+		return a, ok
+	}
+	all := make([]float64, 0, len(stations))
+	for _, a := range stations {
+		all = append(all, a)
+	}
+	sort.Float64s(all)
+
+	var last *transit.Arrival
+	if a, ok := m.arrivals.Get(t.TripID); ok {
+		last = &a
+	}
+	knots := m.subwayModel.Knots(t, last, along, all, now)
+	pos, ok := transit.PositionAt(knots, true, now)
+	if !ok || !m.area.Contains(path.At(pos)) {
+		return mapTrainJSON{}, false
+	}
+	piece, start := path.Within(m.area, pos)
+	for i := range knots {
+		knots[i].Along -= start
+	}
+	return mapTrainJSON{
+		ID:        "subway-" + t.TripID,
+		Kind:      "subway",
+		Label:     t.RouteID,
+		colorJSON: routeColor(static.routes[t.RouteID]),
+		Cars:      subwayCars,
+		CarLength: subwayCarLength,
+		Path:      flatten(piece.Points),
+		Knots:     knots,
+		Ease:      true,
+	}, true
+}
+
+// tripShape finds the shape of a subway trip. NYCT trip ids end with it
+// ("089900_E..S69R"), but some only with the route and direction
+// ("121550_F..S"); then it is the shape of that route and direction on
+// which most of the trip's stops are.
+func tripShape(static *subwayStatic, t transit.LiveTrip) (string, bool) {
+	_, id, _ := strings.Cut(t.TripID, "_")
+	if _, ok := static.shapes[id]; ok {
+		return id, true
+	}
+	best, most := "", 0
+	for shape, stations := range static.stations {
+		if !strings.HasPrefix(shape, id) {
 			continue
 		}
-		piece, start := path.Within(m.area, along)
-		for i := range knots {
-			knots[i].Along -= start
+		n := 0
+		for _, s := range t.Stops {
+			if _, ok := stations[station(s.StopID)]; ok {
+				n++
+			}
 		}
-		out.Trains = append(out.Trains, mapTrainJSON{
-			ID:        "subway-" + t.TripID,
-			Kind:      "subway",
-			Label:     t.RouteID,
-			colorJSON: routeColor(static.routes[t.RouteID]),
-			Cars:      subwayCars,
-			CarLength: subwayCarLength,
-			Path:      flatten(piece.Points),
-			Knots:     knots,
-			Ease:      true,
-		})
+		if n > most || (n == most && shape < best) {
+			best, most = shape, n
+		}
 	}
+	return best, most > 0
+}
+
+// station is the station of a subway platform: "G08" for "G08S".
+func station(platform string) string {
+	if strings.HasSuffix(platform, "N") || strings.HasSuffix(platform, "S") {
+		return platform[:len(platform)-1]
+	}
+	return platform
 }
 
 // leavesFrom reports whether t is still to leave stop.
@@ -270,179 +403,6 @@ func leavesFrom(t transit.LiveTrip, stop string, now time.Time) bool {
 		}
 	}
 	return false
-}
-
-// arrivals remembers when each subway train got to the stop it is at. The
-// feed only says which stop a train is at (or last passed), with the time
-// of its latest report; the time the stop changes is when it arrived.
-type arrivals struct {
-	mu    sync.Mutex
-	trips map[string]arrival // by trip id
-}
-
-type arrival struct {
-	stop string
-	time time.Time
-	seen time.Time // last in the feed
-}
-
-// update notes the trains that have reached a new stop since the last
-// update, and forgets those that have gone from the feed.
-func (a *arrivals) update(trips []transit.LiveTrip, now time.Time) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.trips == nil {
-		a.trips = map[string]arrival{}
-	}
-	for _, t := range trips {
-		if t.StoppedAt == "" {
-			continue
-		}
-		prev, ok := a.trips[t.TripID]
-		if !ok || prev.stop != t.StoppedAt {
-			prev = arrival{stop: t.StoppedAt, time: t.Reported}
-			// Just after leaving, the feed still lists the stop with its
-			// time.
-			for _, s := range t.Stops {
-				if s.StopID == t.StoppedAt && s.Time.Before(prev.time) {
-					prev.time = s.Time
-				}
-			}
-		}
-		prev.seen = now
-		a.trips[t.TripID] = prev
-	}
-	for id, arr := range a.trips {
-		if now.Sub(arr.seen) > 10*time.Minute {
-			delete(a.trips, id)
-		}
-	}
-}
-
-func (a *arrivals) get(tripID string) (arrival, bool) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	arr, ok := a.trips[tripID]
-	return arr, ok
-}
-
-// How subway trains are thought to move: they stand at a stop for
-// subwayDwell, then run to the next one at subwaySpeed on average.
-const (
-	subwayDwell = 20 * time.Second
-	subwaySpeed = 10.0 // m/s
-)
-
-// subwayKnots plans the way of a subway train from the stop it last
-// reached, as remembered in arr, if any: it stands there, runs to its next stop on path,
-// and waits there until the feed says it got there. So a train is never
-// drawn more than a stop ahead of where it is known to be, and never moves
-// backwards. Only at the start of its path, where trains wait for their
-// time, does it leave in time for its predicted arrival at the next stop.
-// With nothing known it comes from the station before its next stop, in
-// time for the predicted arrival. stations are the stations on path, in
-// meters along it.
-//
-// The predictions alone don't make for smooth motion: they are revised
-// by up to a minute at every update, which moves trains back and forth by
-// hundreds of meters.
-func subwayKnots(t transit.LiveTrip, arr *arrival, path transit.Path, stops map[string]transit.Stop, stations []float64, now time.Time) []knot {
-	type stop struct {
-		knot
-		left bool // the time is past
-	}
-	var on []stop
-	for _, s := range t.Stops {
-		if a, off := path.Locate(stops[s.StopID].LatLon); off < nearTrack {
-			on = append(on, stop{knot{s.Time, a}, !s.Time.After(now)})
-		}
-	}
-
-	var last *knot
-	if arr != nil {
-		if a, off := path.Locate(stops[arr.stop].LatLon); off < nearTrack {
-			last = &knot{arr.time, a}
-		}
-	}
-	// Without arr, the last stop the feed lists as left. With it, a stop
-	// listed as left after arr may just be late.
-	for _, s := range on {
-		if arr == nil && s.left {
-			last = &s.knot
-		}
-	}
-	var next *knot
-	for _, s := range on {
-		if (last != nil && s.Along > last.Along+nearTrack) || (last == nil && !s.left) {
-			next = &s.knot
-			break
-		}
-	}
-	run := func(from, to float64) time.Duration { return seconds((to - from) / subwaySpeed) }
-
-	switch {
-	case next == nil && last == nil:
-		return nil
-	case next == nil:
-		return []knot{*last}
-	case last == nil:
-		prev := -1.0
-		for _, a := range stations {
-			if a < next.Along-nearTrack && a > prev {
-				prev = a
-			}
-		}
-		if prev < 0 {
-			return []knot{*next}
-		}
-		return []knot{{next.Time.Add(-run(prev, next.Along)), prev}, *next}
-	}
-	leave := last.Time.Add(subwayDwell)
-	if l := next.Time.Add(-run(last.Along, next.Along)); last.Along < nearTrack && l.After(leave) {
-		leave = l
-	}
-	return []knot{*last, {leave, last.Along}, {leave.Add(run(last.Along, next.Along)), next.Along}}
-}
-
-// positionAt is where a subway train following knots is at t, in meters,
-// the same way as the frontend has it.
-func positionAt(knots []knot, t time.Time) (float64, bool) {
-	if len(knots) == 0 {
-		return 0, false
-	}
-	for i := 1; i < len(knots); i++ {
-		a, b := knots[i-1], knots[i]
-		if t.Before(b.Time) {
-			if t.Before(a.Time) {
-				return a.Along, true
-			}
-			f := float64(t.Sub(a.Time)) / float64(b.Time.Sub(a.Time))
-			return a.Along + (b.Along-a.Along)*f*f*(3-2*f), true
-		}
-	}
-	return knots[len(knots)-1].Along, true
-}
-
-func seconds(s float64) time.Duration {
-	return time.Duration(s * float64(time.Second))
-}
-
-// stationsOn lists the stops in area that are on any of paths.
-func stationsOn(stops map[string]transit.Stop, paths []transit.Path, area transit.BBox, kind, home string) []stationJSON {
-	var out []stationJSON
-	for id, s := range stops {
-		if !area.Contains(s.LatLon) {
-			continue
-		}
-		for _, p := range paths {
-			if _, off := p.Locate(s.LatLon); off < nearTrack {
-				out = append(out, stationJSON{Name: s.Name, Kind: kind, Lon: s.Lon, Lat: s.Lat, Home: id == home})
-				break
-			}
-		}
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return out
 }
 
 func sortedShapes(shapes map[string]transit.Path) []transit.Path {
