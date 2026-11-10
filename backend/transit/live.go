@@ -55,7 +55,7 @@ func parseTrips(b []byte) (*gtfs.FeedMessage, error) {
 // Poll fetches the feed now and then every interval until ctx is done.
 func (f *Live[T]) Poll(ctx context.Context, interval time.Duration) {
 	for {
-		if err := f.fetch(ctx); err != nil {
+		if err := f.Fetch(ctx); err != nil {
 			log.Printf("fetching %s: %v", f.url, err)
 		}
 		select {
@@ -66,7 +66,8 @@ func (f *Live[T]) Poll(ctx context.Context, interval time.Duration) {
 	}
 }
 
-func (f *Live[T]) fetch(ctx context.Context) error {
+// Fetch fetches the feed now.
+func (f *Live[T]) Fetch(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 

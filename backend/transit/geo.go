@@ -92,6 +92,31 @@ func (p Path) Locate(q LatLon) (along, off float64) {
 	return along, off
 }
 
+// StopsAlong returns the stops that are within meters of p, by how far
+// along p they are.
+func StopsAlong(p Path, stops map[string]Stop, within float64) map[string]float64 {
+	out := map[string]float64{}
+	if len(p.Points) == 0 {
+		return out
+	}
+	// Only look closer at stops near the path's bounding box.
+	b := BBox{p.Points[0].Lon, p.Points[0].Lat, p.Points[0].Lon, p.Points[0].Lat}
+	for _, q := range p.Points {
+		b = BBox{min(b.West, q.Lon), min(b.South, q.Lat), max(b.East, q.Lon), max(b.North, q.Lat)}
+	}
+	d := within / metersPerDegree
+	b = BBox{b.West - 2*d, b.South - d, b.East + 2*d, b.North + d}
+	for id, s := range stops {
+		if !b.Contains(s.LatLon) {
+			continue
+		}
+		if a, off := p.Locate(s.LatLon); off <= within {
+			out[id] = a
+		}
+	}
+	return out
+}
+
 // Within returns the stretch of p that runs through b around the point
 // along meters from the start: from the last point outside b before it to
 // the first point outside b after it. The second result is where the

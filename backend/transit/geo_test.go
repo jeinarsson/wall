@@ -39,3 +39,15 @@ func TestNetwork(t *testing.T) {
 		t.Errorf("got %d segments, want 4 (3 of track, 1 of other)", len(segs))
 	}
 }
+
+func TestStopsAlong(t *testing.T) {
+	stops := map[string]Stop{
+		"on":  {LatLon: LatLon{10 / metersPerDegree, 1200 / metersPerDegree}},
+		"off": {LatLon: LatLon{500 / metersPerDegree, 1200 / metersPerDegree}},
+		"far": {LatLon: LatLon{1, 1}},
+	}
+	got := StopsAlong(track, stops, 60)
+	if len(got) != 1 || !near(got["on"], 1200) {
+		t.Errorf("got %v, want on at 1200", got)
+	}
+}

@@ -13,6 +13,7 @@ import (
 //
 // The API is not documented and might change without notice.
 type TrainLocation struct {
+	TrainID   string // "LIRR_2026-11-08_6267", for NewTrainLocationFeed
 	TrainNum  string // the GTFS trip_short_name
 	Direction string // "E" or "W"
 	Canceled  bool
@@ -36,14 +37,35 @@ type TrainLocationStop struct {
 // LocationFeed is the list of LIRR trains running now.
 type LocationFeed = Live[[]TrainLocation]
 
+// TrainLocationFeed is the location of one train, which is much smaller
+// than the whole list.
+type TrainLocationFeed = Live[TrainLocation]
+
+var trainTimeHeader = http.Header{"Accept-Version": {"3.0"}}
+
 // NewLocationFeed returns a feed of the trains at url, such as
 // https://backend-unified.mylirr.org/locations?geometry=NONE&railroad=LIRR
 func NewLocationFeed(url string) *LocationFeed {
-	return &LocationFeed{url: url, parse: parseLocations, header: http.Header{"Accept-Version": {"3.0"}}}
+	return &LocationFeed{url: url, parse: parseLocations, header: trainTimeHeader}
+}
+
+// NewTrainLocationFeed returns a feed of the train at url, such as
+// https://backend-unified.mylirr.org/locations/LIRR_2026-11-08_6267?geometry=NONE
+func NewTrainLocationFeed(url string) *TrainLocationFeed {
+	return &TrainLocationFeed{url: url, parse: parseLocation, header: trainTimeHeader}
+}
+
+func parseLocation(b []byte) (TrainLocation, error) {
+	trains, err := parseLocations(append(append([]byte("["), b...), ']'))
+	if err != nil || len(trains) != 1 {
+		return TrainLocation{}, err
+	}
+	return trains[0], nil
 }
 
 func parseLocations(b []byte) ([]TrainLocation, error) {
 	var trains []struct {
+		TrainID  string `json:"train_id"`
 		TrainNum string `json:"train_num"`
 		Details  struct {
 			Direction string
@@ -77,6 +99,7 @@ func parseLocations(b []byte) ([]TrainLocation, error) {
 	var out []TrainLocation
 	for _, t := range trains {
 		l := TrainLocation{
+			TrainID:   t.TrainID,
 			TrainNum:  t.TrainNum,
 			Direction: t.Details.Direction,
 			Canceled:  t.Status.Canceled,
