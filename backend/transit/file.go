@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"sync"
 	"time"
@@ -17,9 +18,11 @@ import (
 // File is static data downloaded to a local file and loaded from there.
 // Poll loads the cached file at startup and keeps it up to date.
 type File[T any] struct {
-	url  string
-	path string
-	load func(path string) (T, error)
+	urls   []string // the first, and mirrors
+	path   string
+	load   func(path string) (T, error)
+	header http.Header
+	next   int // the url to try first: the last that worked
 
 	mu     sync.Mutex
 	data   T
@@ -29,7 +32,23 @@ type File[T any] struct {
 // NewFile returns a file downloaded from url, cached at path and read
 // with load.
 func NewFile[T any](url, path string, load func(path string) (T, error)) *File[T] {
-	return &File[T]{url: url, path: path, load: load}
+	return &File[T]{urls: []string{url}, path: path, load: load}
+}
+
+// WithMirrors adds urls to try in turn when the others fail.
+func (f *File[T]) WithMirrors(urls ...string) *File[T] {
+	f.urls = append(f.urls, urls...)
+	return f
+}
+
+// mirrorPause is how long to wait before trying the next mirror, as the
+// Overpass API asks after errors.
+var mirrorPause = 30 * time.Second
+
+// WithHeader adds header to the requests for f.
+func (f *File[T]) WithHeader(header http.Header) *File[T] {
+	f.header = header
+	return f
 }
 
 // FromZip adapts a loader for the contents of a zip archive, such as a
@@ -46,8 +65,9 @@ func FromZip[T any](load func(fs.FS) (T, error)) func(path string) (T, error) {
 	}
 }
 
-// FromCSV adapts a loader for CSV rows to a loader for the file's path.
-func FromCSV[T any](load func(io.Reader) (T, error)) func(path string) (T, error) {
+// FromFile adapts a loader for the file's contents to a loader for its
+// path.
+func FromFile[T any](load func(io.Reader) (T, error)) func(path string) (T, error) {
 	return func(path string) (T, error) {
 		f, err := os.Open(path)
 		if err != nil {
@@ -60,22 +80,34 @@ func FromCSV[T any](load func(io.Reader) (T, error)) func(path string) (T, error
 }
 
 // Poll loads the cached file, if any, and then checks url for a newer
-// version now and every interval. Until there is data it retries every
-// minute.
+// version every interval: first when the cached file is interval old (by
+// its modification time), so right away if there is none. Until there is
+// data it retries after a minute, then backs off up to interval. Each time
+// it goes through the mirrors, if any, until one works, starting with the
+// one that worked last.
 func (f *File[T]) Poll(ctx context.Context, interval time.Duration) {
 	if data, err := f.load(f.path); err == nil {
 		f.set(data)
+		if fi, err := os.Stat(f.path); err == nil {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(time.Until(fi.ModTime().Add(interval))):
+			}
+		}
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		log.Printf("loading %s: %v", f.path, err)
 	}
 
+	retry := time.Minute
 	for {
-		if err := f.refresh(ctx); err != nil {
-			log.Printf("refreshing %s: %v", f.url, err)
-		}
 		wait := interval
-		if _, ok := f.Get(); !ok {
-			wait = time.Minute
+		if !f.refreshAny(ctx) {
+			if _, ok := f.Get(); !ok {
+				wait = retry
+				retry = min(2*retry, interval)
+			}
+			log.Printf("refreshing %s failed from all %d sources; trying again in %v", f.path, len(f.urls), wait)
 		}
 		select {
 		case <-ctx.Done():
@@ -85,16 +117,52 @@ func (f *File[T]) Poll(ctx context.Context, interval time.Duration) {
 	}
 }
 
+// refreshAny refreshes from the urls in turn until one works, and reports
+// whether one did.
+func (f *File[T]) refreshAny(ctx context.Context) bool {
+	for i := range f.urls {
+		n := (f.next + i) % len(f.urls)
+		err := f.refresh(ctx, f.urls[n])
+		if err == nil {
+			f.next = n
+			return true
+		}
+		log.Printf("refreshing %s from %s: %v", f.path, host(f.urls[n]), err)
+		if i == len(f.urls)-1 {
+			break
+		}
+		next := f.urls[(n+1)%len(f.urls)]
+		log.Printf("trying %s in %v", host(next), mirrorPause)
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(mirrorPause):
+		}
+	}
+	return false
+}
+
+// host is the host of url, for logs: Overpass URLs carry a whole query.
+func host(u string) string {
+	if p, err := url.Parse(u); err == nil && p.Host != "" {
+		return p.Host
+	}
+	return u
+}
+
 // refresh downloads url if it is newer than the cached file. The file's
 // modification time is set to the server's Last-Modified, so the request is
 // a cheap 304 when nothing has changed.
-func (f *File[T]) refresh(ctx context.Context) error {
+func (f *File[T]) refresh(ctx context.Context, url string) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, "GET", f.url, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return err
+	}
+	for k, v := range f.header {
+		req.Header[k] = v
 	}
 	if fi, err := os.Stat(f.path); err == nil {
 		if _, ok := f.Get(); ok {
@@ -139,7 +207,7 @@ func (f *File[T]) refresh(ctx context.Context) error {
 		return err
 	}
 	f.set(data)
-	log.Printf("updated %s from %s", f.path, f.url)
+	log.Printf("updated %s from %s", f.path, host(url))
 	return nil
 }
 
@@ -155,4 +223,9 @@ func (f *File[T]) Get() (T, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.data, f.loaded
+}
+
+// FromCSV is the old name of FromFile.
+func FromCSV[T any](load func(io.Reader) (T, error)) func(path string) (T, error) {
+	return FromFile(load)
 }
