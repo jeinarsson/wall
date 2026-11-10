@@ -23,8 +23,8 @@ const LATE = 60_000
 const VERY_LATE = 5 * 60_000
 
 // Note says what is special about a train, if anything: canceled, its
-// status at the station, or else how late it is.
-function Note({ d, delay }: { d: Departure, delay: number }) {
+// status at the station, or else its expected time if late.
+function Note({ d, expected, delay }: { d: Departure, expected: Date | null, delay: number }) {
   if (d.Canceled) {
     return <span className="lirr-note canceled">Canceled</span>
   }
@@ -32,8 +32,8 @@ function Note({ d, delay }: { d: Departure, delay: number }) {
     const kind = d.Status === 'Held' ? 'late' : 'here'
     return <span className={`lirr-note ${kind}`}>{d.Status}</span>
   }
-  if (delay >= LATE) {
-    return <span className={`lirr-note ${delay >= VERY_LATE ? 'very-late' : 'late'}`}>{Math.round(delay / 60_000)} min late</span>
+  if (expected && delay >= LATE) {
+    return <span className={`lirr-note expected ${delay >= VERY_LATE ? 'very-late' : 'late'}`}>{format(expected, 'HH:mm')}</span>
   }
   return <span />
 }
@@ -56,7 +56,7 @@ function Row({ d, now }: { d: Departure, now: Date }) {
             <Minutes minutes={minutesUntil(expected ?? scheduled, now)} />
             <span className="transit-unit">min</span>
           </>}
-      <Note d={d} delay={delay} />
+      <Note d={d} expected={expected} delay={delay} />
     </div>
   )
 }
